@@ -1,0 +1,377 @@
+#include "MagixxPanel.h"
+#include "../ParameterIDs.h"
+#include "SuomiLookAndFeel.h"
+
+MagixxPanel::MagixxPanel (juce::AudioProcessorValueTreeState& apvts)
+    : apvts (apvts)
+{
+    const juce::StringArray waveNames {
+        "Sine", "Triangle", "Square", "Saw Up", "Saw Down", "Rnd Sine", "Rnd Square"
+    };
+
+    auto makeKnob = [&] (juce::Slider& sl, juce::Label& lb, const juce::String& id)
+    {
+        sl.setSliderStyle (juce::Slider::RotaryVerticalDrag);
+        sl.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+        addAndMakeVisible (sl);
+        addAndMakeVisible (lb);
+        return std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+            apvts, id, sl);
+    };
+
+    // ── Start LFO ────────────────────────────────────────────────────────────
+    startLfoTitle.getProperties().set ("customFont", true);
+    startLfoTitle.setFont (juce::Font (21.13f, juce::Font::bold));
+    addAndMakeVisible (startLfoTitle);
+
+    for (int i = 0; i < waveNames.size(); ++i)
+        startWaveBox.addItem (waveNames[i], i + 1);
+    addAndMakeVisible (startWaveBox);
+    startWaveAttach = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+        apvts, ParamIDs::lfoWaveform, startWaveBox);
+
+    addAndMakeVisible (syncButton);
+    syncAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        apvts, ParamIDs::lfoTempoSync, syncButton);
+
+    {
+        const juce::StringArray divNames {
+            "1/32", "1/16", "1/8", "1/8D", "1/4", "1/4D",
+            "1/2",  "1/2D", "1/1", "1/1D", "2/1"
+        };
+        for (int i = 0; i < divNames.size(); ++i)
+            syncDivBox.addItem (divNames[i], i + 1);
+    }
+    // Div label not shown per UI spec.
+    syncDivLabel.setVisible (false);
+    addAndMakeVisible (syncDivBox);
+    syncDivAttach = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+        apvts, ParamIDs::lfoSyncDiv, syncDivBox);
+
+    startRateAttach  = makeKnob (startRateSlider,  startRateLabel,  ParamIDs::lfoRate);
+    startDepthAttach = makeKnob (startDepthSlider, startDepthLabel, ParamIDs::lfoDepth);
+    startRateSlider .getProperties().set ("thickPointer", true);
+    startDepthSlider.getProperties().set ("thickPointer", true);
+
+    // Step override button: step controller drives sample start instead of LFO.
+    addAndMakeVisible (stepOverrideButton);
+    stepOverrideAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        apvts, ParamIDs::lfoStartStepOverride, stepOverrideButton);
+
+    // Slicer button: each MIDI note maps to one evenly-spaced slice of the sample window.
+    // Mutually exclusive with Step override.
+    addAndMakeVisible (slicerButton);
+    slicerAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        apvts, ParamIDs::slicerEnabled, slicerButton);
+
+    // Grey out Rate/Depth knobs and labels when either override mode is active.
+    auto syncDisabledVisual = [this]
+    {
+        const bool  disabled = stepOverrideButton.getToggleState() || slicerButton.getToggleState();
+        const float a        = disabled ? 0.35f : 1.0f;
+        startRateSlider .setAlpha (a);
+        startDepthSlider.setAlpha (a);
+        startRateLabel  .setAlpha (a);
+        startDepthLabel .setAlpha (a);
+        startRateSlider .getProperties().set ("lfoDisabled", disabled);
+        startDepthSlider.getProperties().set ("lfoDisabled", disabled);
+        startRateSlider .repaint();
+        startDepthSlider.repaint();
+    };
+
+    // Mutual exclusion: turning one ON turns the other OFF, then syncs visuals.
+    stepOverrideButton.onStateChange = [this, syncDisabledVisual]
+    {
+        if (stepOverrideButton.getToggleState())
+        {
+            slicerButton.setToggleState (false, juce::sendNotification);
+            // Auto-enable the step controller when Step mode is turned on.
+            if (this->apvts.getRawParameterValue (ParamIDs::gateEnabled)->load() < 0.5f)
+                if (auto* p = this->apvts.getParameter (ParamIDs::gateEnabled))
+                    p->setValueNotifyingHost (1.0f);
+        }
+        syncDisabledVisual();
+    };
+    slicerButton.onStateChange = [this, syncDisabledVisual]
+    {
+        if (slicerButton.getToggleState())
+            stepOverrideButton.setToggleState (false, juce::sendNotification);
+        syncDisabledVisual();
+    };
+    syncDisabledVisual();   // apply immediately (e.g. after project restore)
+
+    // ── Velocity LFO ─────────────────────────────────────────────────────────
+    velLfoTitle.getProperties().set ("customFont", true);
+    velLfoTitle.setFont (juce::Font (21.13f, juce::Font::bold));
+    addAndMakeVisible (velLfoTitle);
+
+    for (int i = 0; i < waveNames.size(); ++i)
+        velWaveBox.addItem (waveNames[i], i + 1);
+    addAndMakeVisible (velWaveBox);
+    velWaveAttach = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+        apvts, ParamIDs::velLfoWaveform, velWaveBox);
+
+    addAndMakeVisible (velSyncButton);
+    velSyncAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        apvts, ParamIDs::velLfoTempoSync, velSyncButton);
+
+    {
+        const juce::StringArray divNames {
+            "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1"
+        };
+        for (int i = 0; i < divNames.size(); ++i)
+            velSyncDivBox.addItem (divNames[i], i + 1);
+    }
+    velSyncDivLabel.setVisible (false);
+    addAndMakeVisible (velSyncDivBox);
+    velSyncDivAttach = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+        apvts, ParamIDs::velLfoSyncDiv, velSyncDivBox);
+
+    velRateAttach  = makeKnob (velRateSlider,  velRateLabel,  ParamIDs::velLfoRate);
+    velDepthAttach = makeKnob (velDepthSlider, velDepthLabel, ParamIDs::velLfoDepth);
+
+    addAndMakeVisible (velMeter);
+
+    // Probability knob — styled as a standard FX knob (smaller than Magixx).
+    velProbSlider.setSliderStyle (juce::Slider::RotaryVerticalDrag);
+    velProbSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+    addAndMakeVisible (velProbLabel);
+    addAndMakeVisible (velProbSlider);
+    velProbAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        apvts, ParamIDs::velLfoProb, velProbSlider);
+
+    // ── Rel LFO ───────────────────────────────────────────────────────────────
+    relLfoTitle.getProperties().set ("customFont", true);
+    relLfoTitle.setFont (juce::Font (21.13f, juce::Font::bold));
+    addAndMakeVisible (relLfoTitle);
+
+    for (int i = 0; i < waveNames.size(); ++i)
+        relWaveBox.addItem (waveNames[i], i + 1);
+    addAndMakeVisible (relWaveBox);
+    relWaveAttach = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+        apvts, ParamIDs::volRelLfoWaveform, relWaveBox);
+
+    addAndMakeVisible (relSyncButton);
+    relSyncAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        apvts, ParamIDs::volRelLfoTempoSync, relSyncButton);
+
+    {
+        const juce::StringArray divNames {
+            "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1"
+        };
+        for (int i = 0; i < divNames.size(); ++i)
+            relSyncDivBox.addItem (divNames[i], i + 1);
+    }
+    // Div label not shown per UI spec.
+    relSyncDivLabel.setVisible (false);
+    addAndMakeVisible (relSyncDivBox);
+    relSyncDivAttach = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+        apvts, ParamIDs::volRelLfoSyncDiv, relSyncDivBox);
+
+    relRateAttach  = makeKnob (relRateSlider,  relRateLabel,  ParamIDs::volRelLfoRate);
+    relDepthAttach = makeKnob (relDepthSlider, relDepthLabel, ParamIDs::volRelLfoDepth);
+
+    // ── Pitch LFO ─────────────────────────────────────────────────────────────
+    pitchLfoTitle.getProperties().set ("customFont", true);
+    pitchLfoTitle.setFont (juce::Font (21.13f, juce::Font::bold));
+    addAndMakeVisible (pitchLfoTitle);
+
+    for (int i = 0; i < waveNames.size(); ++i)
+        pitchWaveBox.addItem (waveNames[i], i + 1);
+    addAndMakeVisible (pitchWaveBox);
+    pitchWaveAttach = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+        apvts, ParamIDs::pitchLfoWaveform, pitchWaveBox);
+
+    addAndMakeVisible (pitchSyncButton);
+    pitchSyncAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        apvts, ParamIDs::pitchLfoTempoSync, pitchSyncButton);
+
+    {
+        const juce::StringArray divNames {
+            "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1"
+        };
+        for (int i = 0; i < divNames.size(); ++i)
+            pitchSyncDivBox.addItem (divNames[i], i + 1);
+    }
+    pitchSyncDivLabel.setVisible (false);
+    addAndMakeVisible (pitchSyncDivBox);
+    pitchSyncDivAttach = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+        apvts, ParamIDs::pitchLfoSyncDiv, pitchSyncDivBox);
+
+    pitchRateAttach  = makeKnob (pitchRateSlider,  pitchRateLabel,  ParamIDs::pitchLfoRate);
+    pitchDepthAttach = makeKnob (pitchDepthSlider, pitchDepthLabel, ParamIDs::pitchLfoDepth);
+}
+
+void MagixxPanel::paint (juce::Graphics& g)
+{
+    // Overall panel background — same blue hue as the main UI background.
+    g.setColour (SuomiLookAndFeel::kBackground.withAlpha (0.30f));
+    g.fillRoundedRectangle (getLocalBounds().toFloat(), 6.0f);
+
+    // Embossed raised shape behind each LFO column.
+    for (const auto& r : columnBounds)
+    {
+        if (r.isEmpty()) continue;
+
+        const auto rf = r.toFloat();
+        constexpr float corner = 6.0f;
+
+        // Drop shadow — dark, shifted down-right.
+        g.setColour (juce::Colours::black.withAlpha (0.40f));
+        g.fillRoundedRectangle (rf.translated (2.0f, 2.0f), corner);
+
+        // Body — blue hue matching the main UI background, more opaque for depth.
+        g.setColour (SuomiLookAndFeel::kBackground.withAlpha (0.60f));
+        g.fillRoundedRectangle (rf, corner);
+
+        // Top highlight edge (raised feel).
+        g.setColour (juce::Colours::white.withAlpha (0.10f));
+        g.fillRoundedRectangle (rf.withHeight (corner), corner);
+
+    }
+}
+
+void MagixxPanel::resized()
+{
+    auto area = getLocalBounds();
+    area.removeFromLeft   (14);
+    area.removeFromRight  (14);
+    area.removeFromTop    (4);
+    area.removeFromBottom (14);
+
+    constexpr int kProbW  = 45;
+    constexpr int lblH    = 12;
+    constexpr int rowH    = 22;
+    constexpr int gap     = 4;
+
+    // Knob size scales with panel height so the layout stays sensible whether the
+    // panel is at 168 px (full size, kW=84) or 120 px (compact, kW≈36).
+    // Overhead per column: title(12) + gap(4) + waveRow(22) + gap(4) + label(12) = 54 px.
+    const int innerH = area.getHeight() - 12;  // minus reduced(8,6) top+bottom
+    const int kW     = juce::jmax (24, juce::jmin (84, innerH - 54));
+
+    granulizerSlotBounds = {};  // not used in this layout
+
+    // Four-column layout: Start LFO | Vol Rel LFO | Pitch LFO | Velocity LFO, 16px gaps.
+    const int colW = (area.getWidth() - 48) / 4;
+    auto col1 = area.removeFromLeft (colW);  area.removeFromLeft (16);
+    auto col2 = area.removeFromLeft (colW);  area.removeFromLeft (16);
+    auto col3 = area.removeFromLeft (colW);  area.removeFromLeft (16);
+    auto col4 = area;
+
+    columnBounds = { col1.expanded (2), col2.expanded (2),
+                     col3.expanded (2), col4.expanded (2) };
+    repaint();
+
+    auto inner1 = col1.reduced (8, 6);
+    auto inner2 = col2.reduced (8, 6);
+    auto inner3 = col3.reduced (8, 6);
+    auto inner4 = col4.reduced (8, 6);
+
+    auto layoutWaveRow = [&] (juce::Rectangle<int>& col,
+                              juce::ComboBox& waveBox,
+                              juce::ToggleButton& syncBtn, juce::ComboBox& divBox)
+    {
+        auto row = col.removeFromTop (rowH);
+        const int waveBoxW = juce::jmax (50, row.getWidth() - 106);
+        waveBox .setBounds (row.removeFromLeft (waveBoxW));
+        row.removeFromLeft (gap);
+        syncBtn .setBounds (row.removeFromLeft (40));
+        row.removeFromLeft (gap);
+        divBox  .setBounds (row.removeFromLeft (58));
+    };
+
+    auto layoutLfoColumn = [&] (juce::Rectangle<int>& col,
+                                juce::Label& title,
+                                juce::ComboBox& waveBox,
+                                juce::ToggleButton& syncBtn, juce::ComboBox& divBox,
+                                juce::Label& rateLabel,  juce::Slider& rateSlider,
+                                juce::Label& depthLabel, juce::Slider& depthSlider)
+    {
+        title.setBounds (col.removeFromTop (lblH));
+        col.removeFromTop (gap);
+        layoutWaveRow (col, waveBox, syncBtn, divBox);
+        col.removeFromTop (gap);
+
+        auto rateCol  = col.removeFromLeft (kW);
+        col.removeFromLeft (gap * 2);
+        auto depthCol = col.removeFromLeft (kW);
+
+        rateLabel  .setBounds (rateCol .removeFromTop (lblH));
+        rateSlider .setBounds (rateCol .removeFromTop (kW).withWidth (kW));
+        depthLabel .setBounds (depthCol.removeFromTop (lblH));
+        depthSlider.setBounds (depthCol.removeFromTop (kW).withWidth (kW));
+    };
+
+    auto layoutVelocityColumn = [&] (juce::Rectangle<int>& col)
+    {
+        velLfoTitle.setBounds (col.removeFromTop (lblH));
+        col.removeFromTop (gap);
+        layoutWaveRow (col, velWaveBox, velSyncButton, velSyncDivBox);
+        col.removeFromTop (gap);
+
+        auto rateCol  = col.removeFromLeft (kW);
+        col.removeFromLeft (gap * 2);
+        auto depthCol = col.removeFromLeft (kW);
+        col.removeFromLeft (gap * 2);
+        const int probW = juce::jmin (kProbW, kW);
+        auto probCol  = col.removeFromLeft (probW);
+
+        velRateLabel .setBounds  (rateCol .removeFromTop (lblH));
+        velRateSlider.setBounds  (rateCol .removeFromTop (kW).withWidth (kW));
+        velDepthLabel.setBounds  (depthCol.removeFromTop (lblH));
+        velDepthSlider.setBounds (depthCol.removeFromTop (kW).withWidth (kW));
+        velProbLabel .setBounds  (probCol .removeFromTop (lblH));
+        velProbLabel .setJustificationType (juce::Justification::centred);
+        velProbSlider.setBounds  (probCol .removeFromTop (probW).withWidth (probW));
+
+        probCol.removeFromTop (gap);
+        const int meterW = probW / 4;
+        velMeter.setBounds (probCol.withSizeKeepingCentre (meterW, probCol.getHeight()));
+    };
+
+    // Start LFO — inline so Step + Slicer override buttons fit on the knob row.
+    {
+        auto& col = inner1;
+        startLfoTitle.setBounds (col.removeFromTop (lblH));
+        col.removeFromTop (gap);
+        layoutWaveRow (col, startWaveBox, syncButton, syncDivBox);
+        col.removeFromTop (gap);
+
+        const int knobRowY = col.getY();
+        auto rateCol  = col.removeFromLeft (kW);
+        col.removeFromLeft (gap * 2);
+        auto depthCol = col.removeFromLeft (kW);
+        col.removeFromLeft (gap * 2);
+
+        startRateLabel  .setBounds (rateCol .removeFromTop (lblH));
+        startRateSlider .setBounds (rateCol .removeFromTop (kW).withWidth (kW));
+        startDepthLabel .setBounds (depthCol.removeFromTop (lblH));
+        startDepthSlider.setBounds (depthCol.removeFromTop (kW).withWidth (kW));
+
+        constexpr int btnH   = 24;
+        constexpr int btnGap = 2;
+        const int stackH  = btnH * 2 + btnGap;
+        const int btnX    = col.getX();
+        const int btnW    = juce::jmax (38, col.getWidth());
+        const int btnTopY = knobRowY + lblH + (kW - stackH) / 2;
+        stepOverrideButton.setBounds (btnX, btnTopY,                 btnW, btnH);
+        slicerButton      .setBounds (btnX, btnTopY + btnH + btnGap, btnW, btnH);
+    }
+
+    layoutLfoColumn (inner2, relLfoTitle,
+                     relWaveBox,   relSyncButton,   relSyncDivBox,
+                     relRateLabel,   relRateSlider,  relDepthLabel,  relDepthSlider);
+
+    layoutLfoColumn (inner3, pitchLfoTitle,
+                     pitchWaveBox, pitchSyncButton, pitchSyncDivBox,
+                     pitchRateLabel, pitchRateSlider, pitchDepthLabel, pitchDepthSlider);
+
+    layoutVelocityColumn (inner4);
+}
+
+void MagixxPanel::setVelocitySource (std::atomic<float>*    lastVelocity,
+                                     std::atomic<uint32_t>* generation)
+{
+    velMeter.setSource (lastVelocity, generation);
+}

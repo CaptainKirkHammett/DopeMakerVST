@@ -1,0 +1,519 @@
+#include "SamplerVoice.h"
+#include <cmath>
+
+// Finds the frame within ±searchRadius of origin where the amplitude of a
+// single channel is lowest — used to snap each channel independently.
+// preferForward=true  → prefers forward candidates (start: don't go before marker).
+// preferForward=false → prefers backward candidates (end: don't overshoot marker).
+static int findNearestZeroCrossing (const juce::AudioBuffer<float>& buf,
+                                    int origin, int searchRadius,
+                                    bool preferForward, int channel)
+{
+    const int    frames = buf.getNumSamples();
+    const int    ch     = juce::jlimit (0, buf.getNumChannels() - 1, channel);
+    const float* data   = buf.getReadPointer (ch);
+
+    const int originClamped = juce::jlimit (0, frames - 1, origin);
+    int   bestFrame = originClamped;
+    float bestAmp   = std::abs (data[originClamped]);
+
+    if (bestAmp < 1e-4f)
+        return bestFrame;
+
+    for (int d = 1; d <= searchRadius; ++d)
+    {
+        const int fwd  = origin + d;
+        const int back = origin - d;
+
+        auto check = [&] (int f)
+        {
+            if (f < 0 || f >= frames) return;
+            const float amp = std::abs (data[f]);
+            if (amp < bestAmp) { bestAmp = amp; bestFrame = f; }
+        };
+
+        if (preferForward) { check (fwd);  check (back); }
+        else               { check (back); check (fwd);  }
+
+        if (bestAmp < 1e-4f)
+            break;
+    }
+
+    return bestFrame;
+}
+
+void SamplerVoice::prepare (const juce::dsp::ProcessSpec& spec)
+{
+    currentSampleRate = spec.sampleRate;
+
+    volumeEnv.prepare (spec.sampleRate);
+    pitchEnv.prepare  (spec.sampleRate);
+
+    pitchBendSmoothed.reset (spec.sampleRate, 0.005);  // 5 ms smoothing
+    pitchBendSmoothed.setCurrentAndTargetValue (0.0f);
+
+    portamentoGlide.reset (spec.sampleRate, 0.0);
+    portamentoGlide.setCurrentAndTargetValue (0.0f);
+
+    stealGain.reset (spec.sampleRate, static_cast<double> (kStealFadeSamples) / spec.sampleRate);
+    stealGain.setCurrentAndTargetValue (1.0f);
+
+    deClickGain.reset (spec.sampleRate, static_cast<double> (kDeClickSamples) / spec.sampleRate);
+    deClickGain.setCurrentAndTargetValue (1.0f);
+}
+
+void SamplerVoice::startNote (int note, float vel,
+                               std::shared_ptr<const SampleData> sample,
+                               const VoiceParams& p)
+{
+    sampleData = std::move (sample);
+    params     = p;
+    midiNote   = note;
+    velocity   = vel;
+
+    // Calculate start position in frames; reversed playback begins at the end point.
+    // Snap to the nearest zero crossing within a small search window so the first
+    // output sample is at/near zero — eliminates the click that the de-click fade
+    // alone cannot prevent when the waveform starts at high amplitude.
+    static constexpr int kZcSearchRadius = 1024;   // ~23 ms at 44100 Hz
+    const int totalFrames = (sampleData != nullptr) ? sampleData->buffer.getNumSamples() : 0;
+    const int numSrcChans = (sampleData != nullptr) ? sampleData->buffer.getNumChannels() : 1;
+
+    // Find independent zero-crossing frames per channel for both boundaries.
+    // chReadOffset[ch] = offset added to readPos when reading that channel, so
+    // each channel starts and ends at its own zero crossing.
+    {
+        const int rawStart = static_cast<int> (totalFrames * p.startPos);
+        const int rawEnd   = static_cast<int> (totalFrames * p.endPos);
+
+        int zcStart[kMaxChannels], zcEnd[kMaxChannels];
+        for (int ch = 0; ch < kMaxChannels; ++ch)
+        {
+            const int srcCh = juce::jmin (ch, numSrcChans - 1);
+            if (sampleData != nullptr)
+            {
+                zcStart[ch] = findNearestZeroCrossing (sampleData->buffer, rawStart, kZcSearchRadius, true,  srcCh);
+                zcEnd[ch]   = findNearestZeroCrossing (sampleData->buffer, rawEnd,   kZcSearchRadius, false, srcCh);
+            }
+            else
+            {
+                zcStart[ch] = rawStart;
+                zcEnd[ch]   = rawEnd;
+            }
+        }
+
+        if (p.perChannelZC)
+        {
+            // Per-channel mode: each channel reads from its own ZC offset so both
+            // start and end boundaries are click-free per channel.
+            const int refStart = *std::min_element (zcStart, zcStart + kMaxChannels);
+            for (int ch = 0; ch < kMaxChannels; ++ch)
+                chReadOffset[ch] = zcStart[ch] - refStart;
+
+            int refEnd = zcEnd[0] - chReadOffset[0];
+            for (int ch = 1; ch < kMaxChannels; ++ch)
+                refEnd = juce::jmin (refEnd, zcEnd[ch] - chReadOffset[ch]);
+
+            snappedStartFrame = refStart;
+            snappedEndFrame   = refEnd;
+        }
+        else
+        {
+            // Shared mode: use the earliest ZC across channels for both boundaries
+            // so L and R are always in sync (no stereo timing offset).
+            for (int ch = 0; ch < kMaxChannels; ++ch)
+                chReadOffset[ch] = 0;
+
+            snappedStartFrame = *std::min_element (zcStart, zcStart + kMaxChannels);
+            snappedEndFrame   = *std::min_element (zcEnd,   zcEnd   + kMaxChannels);
+        }
+
+        // Guard: ZC snapping can overshoot when the playable region is small
+        // (e.g. LFO offset pushing startPos close to endPos).  Fall back to
+        // raw frame positions if the snapped boundaries are inverted or too close.
+        static constexpr int kMinRegionFrames = 64;
+        if (snappedEndFrame - snappedStartFrame < kMinRegionFrames)
+        {
+            snappedStartFrame = rawStart;
+            snappedEndFrame   = rawEnd;
+            for (int ch = 0; ch < kMaxChannels; ++ch)
+                chReadOffset[ch] = 0;
+
+            // If even the raw region is degenerate, don't activate this voice.
+            if (snappedEndFrame - snappedStartFrame < kMinRegionFrames)
+            {
+                active = false;
+                return;
+            }
+        }
+    }
+
+    if (p.reversed)
+    {
+        readPos         = static_cast<double> (snappedEndFrame);
+        pingPongForward = false;
+    }
+    else
+    {
+        readPos         = static_cast<double> (snappedStartFrame);
+        pingPongForward = true;
+    }
+    active            = true;
+    noteHeld          = true;
+    stealing          = false;
+    stealCountdown    = 0;
+    deClickingOut     = false;
+
+    stealGain.setCurrentAndTargetValue (1.0f);
+
+    // Fade in from silence to avoid a click when the sample doesn't start at zero.
+    deClickGain.setCurrentAndTargetValue (0.0f);
+    deClickGain.setTargetValue (1.0f);
+
+    // Set up portamento glide.  Glide only applies in legato mode — arpeggiated
+    // and stolen voices always jump instantly to the new pitch.
+    {
+        const float targetOffset  = static_cast<float> (note - p.rootNote);
+        const double glideTimeSec = (p.portamentoMs > 0.0f)
+                                    ? static_cast<double> (p.portamentoMs) / 1000.0
+                                    : 0.0;
+        portamentoGlide.reset (currentSampleRate, glideTimeSec);
+        if (glideTimeSec <= 0.0)
+            portamentoGlide.setCurrentAndTargetValue (targetOffset);
+        else
+            portamentoGlide.setTargetValue (targetOffset);
+    }
+
+    volumeEnv.setParameters (p.volAttackMs, p.volDecayMs, p.volSustain, p.volReleaseMs);
+    pitchEnv.setParameters  (p.pitchAttackMs, p.pitchDecayMs, p.pitchSustain, p.pitchReleaseMs);
+    volumeEnv.noteOn();
+    pitchEnv.noteOn();
+
+}
+
+void SamplerVoice::stopNote (bool allowTailOff)
+{
+    noteHeld = false;
+
+    if (!active)
+        return;
+
+    if (allowTailOff)
+    {
+        volumeEnv.noteOff();
+        pitchEnv.noteOff();
+    }
+    else
+    {
+        // De-click fade-out: ramp to silence over kDeClickSamples instead of
+        // cutting immediately — eliminates clicks on hard stops and note stealing.
+        deClickingOut = true;
+        deClickGain.setTargetValue (0.0f);
+    }
+}
+
+void SamplerVoice::forceOff()
+{
+    active         = false;
+    noteHeld       = false;
+    stealing       = false;
+    stealCountdown = 0;
+    deClickingOut  = false;
+    volumeEnv.reset();
+    pitchEnv.reset();
+    sampleData    = nullptr;
+    pendingSample = nullptr;
+}
+
+void SamplerVoice::stealAndRestart (int newMidiNote, float newVelocity,
+                                     std::shared_ptr<const SampleData> newSample,
+                                     const VoiceParams& newParams)
+{
+    // Store pending note data; begin steal fade-out.
+    pendingMidiNote  = newMidiNote;
+    pendingVelocity  = newVelocity;
+    pendingSample    = std::move (newSample);
+    pendingParams    = newParams;
+
+    // Cancel any in-progress de-click fade so it doesn't deactivate the voice
+    // before the steal countdown completes (the steal fade handles the crossfade).
+    deClickingOut = false;
+
+    stealing       = true;
+    stealCountdown = kStealFadeSamples;
+    stealGain.setTargetValue (0.0f);
+}
+
+void SamplerVoice::retriggerPitch (int newMidiNote, float newVelocity, const VoiceParams& p)
+{
+    midiNote = newMidiNote;
+    velocity = newVelocity;
+    noteHeld = true;
+    params   = p;
+
+    const float targetOffset  = static_cast<float> (newMidiNote - p.rootNote);
+    const double glideTimeSec = static_cast<double> (p.portamentoMs) / 1000.0;
+    portamentoGlide.reset (currentSampleRate, glideTimeSec);
+    if (p.portamentoMs <= 0.0f)
+        portamentoGlide.setCurrentAndTargetValue (targetOffset);
+    else
+        portamentoGlide.setTargetValue (targetOffset);
+}
+
+void SamplerVoice::setPitchBend (float semitones)
+{
+    pitchBendSmoothed.setTargetValue (semitones);
+}
+
+bool SamplerVoice::isActive() const
+{
+    return active;
+}
+
+float SamplerVoice::getNormalizedReadPos() const
+{
+    if (sampleData == nullptr || sampleData->buffer.getNumSamples() == 0)
+        return 0.0f;
+    return static_cast<float> (readPos) / static_cast<float> (sampleData->buffer.getNumSamples());
+}
+
+// pitchEnvSample and pitchLfoSemi must be pre-computed by the caller (advance envelopes/LFOs exactly once per sample).
+float SamplerVoice::computePlaybackRatio (float pitchEnvSample, float pitchLfoSemi) const
+{
+    if (sampleData == nullptr)
+        return 1.0f;
+
+    const float noteOffset     = portamentoGlide.getCurrentValue()
+                                 + static_cast<float> (params.semitoneOffset);
+    const float pitchBendSemi  = pitchBendSmoothed.getCurrentValue()
+                                 * static_cast<float> (params.pitchBendRange);
+    const float pitchEnvSemi   = pitchEnvSample * params.pitchEnvDepth;
+    const float totalSemitones = noteOffset + pitchBendSemi + pitchEnvSemi + pitchLfoSemi;
+
+    // Clamp total pitch shift to ±96 semitones (8 octaves) to prevent the voice
+    // from racing through the sample in one step when the LFO pushes pitch to
+    // inaudible extremes — without this the voice dies instantly and the user
+    // hears silence even though MIDI is active.
+    const float clampedSemitones = juce::jlimit (-96.0f, 96.0f, totalSemitones);
+
+    // Fast semitone-to-ratio: exp(n * ln2/12) ≈ exp(n * 0.057762f)
+    const float pitchRatio = std::exp (clampedSemitones * 0.057762f);
+    const float srRatio    = static_cast<float> (sampleData->sourceSampleRate / currentSampleRate);
+    return pitchRatio * srRatio;
+}
+
+float SamplerVoice::readSampleLinear (float pos, int channel) const
+{
+    if (sampleData == nullptr)
+        return 0.0f;
+
+    const auto& buf    = sampleData->buffer;
+    const int   frames = buf.getNumSamples();
+    const int   ch     = juce::jlimit (0, buf.getNumChannels() - 1, channel);
+
+    const int   i0  = static_cast<int> (pos);
+    const int   i1  = i0 + 1;
+    const float frac = pos - static_cast<float> (i0);
+
+    if (i0 < 0 || i1 >= frames)
+        return 0.0f;
+
+    const float* data = buf.getReadPointer (ch);
+    return data[i0] + frac * (data[i1] - data[i0]);
+}
+
+void SamplerVoice::handleLoopBoundary()
+{
+    if (sampleData == nullptr || deClickingOut)
+        return;
+
+    const float startFrame = static_cast<float> (snappedStartFrame);
+    const float endFrame   = static_cast<float> (snappedEndFrame);
+
+    // Degenerate region: start >= end means the voice has nothing to play.
+    // Fade out immediately rather than looping forever at the same position.
+    if (snappedEndFrame <= snappedStartFrame)
+    {
+        deClickingOut = true;
+        deClickGain.setTargetValue (0.0f);
+        return;
+    }
+
+    if (params.looping)
+    {
+        if (params.loopMode == LoopMode::Forward)
+        {
+            // Reversed forward-loop wraps at the start boundary back to the end.
+            if (params.reversed)
+            {
+                if (readPos <= startFrame)
+                    readPos = endFrame;
+            }
+            else
+            {
+                if (readPos >= endFrame)
+                    readPos = startFrame;
+            }
+        }
+        else // PingPong — direction flips at both boundaries regardless of reversed
+        {
+            if (pingPongForward && readPos >= endFrame)
+            {
+                readPos = endFrame - (readPos - endFrame);
+                pingPongForward = false;
+            }
+            else if (!pingPongForward && readPos <= startFrame)
+            {
+                readPos = startFrame + (startFrame - readPos);
+                pingPongForward = true;
+            }
+        }
+    }
+    else
+    {
+        // Reversed one-shot stops when the read head passes the start boundary.
+        if (params.reversed)
+        {
+            if (readPos <= startFrame)
+            {
+                deClickingOut = true;
+                deClickGain.setTargetValue (0.0f);
+            }
+        }
+        else
+        {
+            if (readPos >= endFrame)
+            {
+                deClickingOut = true;
+                deClickGain.setTargetValue (0.0f);
+            }
+        }
+    }
+}
+
+void SamplerVoice::renderSamples (juce::AudioBuffer<float>& outputBuffer,
+                                   int startSample, int numSamples,
+                                   const SharedLfoState& lfoState)
+{
+    // Deactivate rather than silently returning — a voice stuck active with
+    // null sampleData would block voice allocation and swallow all future notes.
+    if (sampleData == nullptr)
+    {
+        active   = false;
+        noteHeld = false;
+        return;
+    }
+    if (!active)
+        return;
+
+    const int numOutputChannels = outputBuffer.getNumChannels();
+    const int numSrcChannels    = sampleData->buffer.getNumChannels();
+
+    for (int s = 0; s < numSamples; ++s)
+    {
+        if (!active)
+            break;
+
+        pitchBendSmoothed.skip (1);
+        portamentoGlide.skip (1);
+        const float pitchEnvSample = pitchEnv.getNextSample();
+        const float pitchLfoSemi   = lfoState.pitchLfoBuffer[startSample + s]
+                                     * lfoState.pitchLfoDepthSemi;
+        const float ratio          = computePlaybackRatio (pitchEnvSample, pitchLfoSemi);
+
+        const float volEnvGain  = volumeEnv.getNextSample();
+        const float stealFactor = stealing ? stealGain.getNextValue() : 1.0f;
+        const float deClick     = deClickGain.getNextValue();
+        const float gain        = velocity * volEnvGain * stealFactor * deClick;
+
+        // Check if steal fade has completed — retrigger the pending note.
+        if (stealing)
+        {
+            --stealCountdown;
+            if (stealCountdown <= 0)
+            {
+                stealing = false;
+                startNote (pendingMidiNote, pendingVelocity, std::move (pendingSample), pendingParams);
+                stealGain.setCurrentAndTargetValue (1.0f);
+            }
+        }
+
+        if (!active)
+            break;
+
+        for (int ch = 0; ch < numOutputChannels; ++ch)
+        {
+            const int srcCh  = (numSrcChannels > 1) ? ch : 0;
+            const int offset = (ch < kMaxChannels) ? chReadOffset[ch] : 0;
+            const float sample = readSampleLinear (static_cast<float> (readPos) + offset, srcCh);
+            outputBuffer.addSample (ch, startSample + s, sample * gain);
+        }
+
+        if (pingPongForward)
+            readPos += ratio;
+        else
+            readPos -= ratio;
+
+        // Guard against NaN/Inf — a corrupted readPos makes all boundary
+        // comparisons fail (NaN is never >= or <=), leaving the voice stuck
+        // active but silent forever, blocking its voice slot.
+        if (std::isnan (readPos) || std::isinf (readPos))
+        {
+            active   = false;
+            noteHeld = false;
+            volumeEnv.reset();
+            pitchEnv.reset();
+            break;
+        }
+
+        handleLoopBoundary();
+
+        // While a steal is in progress the voice must stay active so the
+        // countdown can complete and startNote() fires for the pending note.
+        // Skipping these checks prevents the envelope release or de-click
+        // fade from prematurely killing voice[0] in mono mode.
+        if (!stealing)
+        {
+            // Stop voice once the de-click fade-out reaches silence.
+            if (deClickingOut && !deClickGain.isSmoothing())
+            {
+                active = false;
+                volumeEnv.reset();
+                pitchEnv.reset();
+                break;
+            }
+
+            // Stop voice when volume envelope finishes (non-looping or after note-off).
+            if (!volumeEnv.isActive())
+            {
+                active = false;
+                break;
+            }
+        }
+    }
+}
+
+void SamplerVoice::renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
+                                     int startSample, int numSamples,
+                                     const SharedLfoState& lfoState)
+{
+    if (!active)
+        return;
+
+    // Modulate the volume envelope's release time from the shared vol release LFO.
+    // Bipolar multiplicative: positive lfoOut lengthens release, negative shortens it.
+    // The negative side gets a 1.5× boost so random draws around -0.67 reliably reach
+    // very short release values — without this, uniform random targets rarely land near
+    // -1.0 and the floor is almost never touched.  Floor lowered to 3ms so those short
+    // releases are audible.
+    const float lfoOut     = lfoState.volRelLfoSample;
+    const float boostedLfo = lfoOut < 0.0f ? lfoOut * 1.5f : lfoOut;
+    const float releaseMs  = (lfoState.volRelLfoDepth < 1e-4f)
+        ? lfoState.volRelBaseReleaseMs
+        : juce::jmax (3.0f, lfoState.volRelBaseReleaseMs
+                             * (1.0f + lfoState.volRelLfoDepth * boostedLfo));
+    volumeEnv.setParameters (params.volAttackMs, params.volDecayMs,
+                              params.volSustain, releaseMs);
+
+    renderSamples (outputBuffer, startSample, numSamples, lfoState);
+}

@@ -1,0 +1,40 @@
+# Build outputs
+build/
+output/
+cmake-build-*/
+out/
+
+# IDE files
+.vs/
+.vscode/
+*.user
+*.suo
+*.sln
+*.vcxproj*
+.idea/
+*.swp
+*~
+
+# Claude Code local config
+.claude/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Sample sounds (large binary files)
+samplesounds/
+
+# Compiled objects
+*.o
+*.obj
+*.pch
+*.pdb
+*.lib
+*.dll
+*.exe
+*.vst3
+*.component
+
+# CPM cache (downloaded dependencies)
+build/_deps/
