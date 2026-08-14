@@ -110,6 +110,20 @@ void FlangerPanel::paint (juce::Graphics& g)
 
 }
 
+void FlangerPanel::mouseUp (const juce::MouseEvent& e)
+{
+    if (omBounds.contains (e.getPosition()) || eyeBounds.contains (e.getPosition()))
+        juce::URL ("https://www.facebook.com/groups/162323773830358").launchInDefaultBrowser();
+}
+
+void FlangerPanel::mouseMove (const juce::MouseEvent& e)
+{
+    if (omBounds.contains (e.getPosition()) || eyeBounds.contains (e.getPosition()))
+        setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    else
+        setMouseCursor (juce::MouseCursor::NormalCursor);
+}
+
 void FlangerPanel::resized()
 {
     auto area = getLocalBounds().reduced (4);

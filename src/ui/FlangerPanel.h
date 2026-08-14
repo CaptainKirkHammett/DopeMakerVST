@@ -8,8 +8,10 @@ class FlangerPanel : public juce::Component
 {
 public:
     explicit FlangerPanel (juce::AudioProcessorValueTreeState& apvts);
-    void paint   (juce::Graphics&) override;
-    void resized () override;
+    void paint    (juce::Graphics&) override;
+    void resized  () override;
+    void mouseUp  (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
 
     void setModSources (std::atomic<float>* gateLevel,    std::atomic<float>* gateAmt,
                         std::atomic<float>* afEnvLevel,  std::atomic<float>* afEnvAmt,
