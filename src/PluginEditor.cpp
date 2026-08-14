@@ -45,12 +45,12 @@ PluginEditor::PluginEditor (PluginProcessor& p)
 
     // Header.
     titleLabel.getProperties().set ("customFont", true);
-    titleLabel.setText ("Dope Maker VST", juce::dontSendNotification);
+    titleLabel.setText ("Dope Maker VST 0.2780.0.1", juce::dontSendNotification);
     titleLabel.setFont (juce::Font (93.31f, juce::Font::bold));  // 15 % smaller than original 109.78 f
     titleLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff));
     uiRoot.addAndMakeVisible (titleLabel);
 
-    betaLabel.setText ("Beta v0.2780", juce::dontSendNotification);
+    betaLabel.setText ("Beta v0.2780.0.1", juce::dontSendNotification);
     betaLabel.setFont (juce::Font (16.0f, juce::Font::italic));
     betaLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff).withAlpha (0.7f));
     betaLabel.setJustificationType (juce::Justification::topLeft);
