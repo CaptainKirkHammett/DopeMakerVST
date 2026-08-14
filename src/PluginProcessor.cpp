@@ -473,7 +473,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
     // Mix LFO.
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::delayMixLfoWave, "Delay Mix LFO Wave",
-        juce::StringArray { "Sine","Triangle","Square","Saw Up","Saw Down","Rnd Sine","Rnd Square" }, 0));
+        juce::StringArray { "Sine","Triangle","Square","Saw Up","Saw Down","Rnd Sine","Rnd Square" }, 4));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::delayMixLfoRate, "Delay Mix LFO Rate",
         juce::NormalisableRange<float> (0.01f, 10.0f, 0.0f, 0.3f), 0.5f));

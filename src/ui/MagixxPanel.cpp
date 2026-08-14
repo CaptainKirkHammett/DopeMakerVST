@@ -100,6 +100,28 @@ MagixxPanel::MagixxPanel (juce::AudioProcessorValueTreeState& apvts)
     };
     syncDisabledVisual();   // apply immediately (e.g. after project restore)
 
+    // Grey out Start Rate knob when Sync is active (rate is ignored in sync mode).
+    auto startSyncVisual = [this]
+    {
+        const bool synced = syncButton.getToggleState();
+        const bool disabled = synced || stepOverrideButton.getToggleState() || slicerButton.getToggleState();
+        const float a = disabled ? 0.35f : 1.0f;
+        startRateSlider.setAlpha (a);
+        startRateLabel .setAlpha (a);
+        startRateSlider.setEnabled (! disabled);
+        startRateSlider.repaint();
+
+        const float divA = synced ? 1.0f : 0.35f;
+        syncDivBox.setAlpha (divA);
+        syncDivBox.setEnabled (synced);
+    };
+    syncButton.onStateChange = [startSyncVisual, syncDisabledVisual]
+    {
+        syncDisabledVisual();
+        startSyncVisual();
+    };
+    startSyncVisual();
+
     // ── Velocity LFO ─────────────────────────────────────────────────────────
     velLfoTitle.getProperties().set ("customFont", true);
     velLfoTitle.setFont (juce::Font (21.13f, juce::Font::bold));
@@ -129,6 +151,23 @@ MagixxPanel::MagixxPanel (juce::AudioProcessorValueTreeState& apvts)
 
     velRateAttach  = makeKnob (velRateSlider,  velRateLabel,  ParamIDs::velLfoRate);
     velDepthAttach = makeKnob (velDepthSlider, velDepthLabel, ParamIDs::velLfoDepth);
+
+    // Grey out Velocity Rate knob when Sync is active.
+    auto velSyncVisual = [this]
+    {
+        const bool synced = velSyncButton.getToggleState();
+        const float a = synced ? 0.35f : 1.0f;
+        velRateSlider.setAlpha (a);
+        velRateLabel .setAlpha (a);
+        velRateSlider.setEnabled (! synced);
+        velRateSlider.repaint();
+
+        const float divA = synced ? 1.0f : 0.35f;
+        velSyncDivBox.setAlpha (divA);
+        velSyncDivBox.setEnabled (synced);
+    };
+    velSyncButton.onStateChange = velSyncVisual;
+    velSyncVisual();
 
     addAndMakeVisible (velMeter);
 
@@ -171,6 +210,23 @@ MagixxPanel::MagixxPanel (juce::AudioProcessorValueTreeState& apvts)
     relRateAttach  = makeKnob (relRateSlider,  relRateLabel,  ParamIDs::volRelLfoRate);
     relDepthAttach = makeKnob (relDepthSlider, relDepthLabel, ParamIDs::volRelLfoDepth);
 
+    // Grey out Release Rate knob when Sync is active.
+    auto relSyncVisual = [this]
+    {
+        const bool synced = relSyncButton.getToggleState();
+        const float a = synced ? 0.35f : 1.0f;
+        relRateSlider.setAlpha (a);
+        relRateLabel .setAlpha (a);
+        relRateSlider.setEnabled (! synced);
+        relRateSlider.repaint();
+
+        const float divA = synced ? 1.0f : 0.35f;
+        relSyncDivBox.setAlpha (divA);
+        relSyncDivBox.setEnabled (synced);
+    };
+    relSyncButton.onStateChange = relSyncVisual;
+    relSyncVisual();
+
     // ── Pitch LFO ─────────────────────────────────────────────────────────────
     pitchLfoTitle.getProperties().set ("customFont", true);
     pitchLfoTitle.setFont (juce::Font (21.13f, juce::Font::bold));
@@ -200,6 +256,23 @@ MagixxPanel::MagixxPanel (juce::AudioProcessorValueTreeState& apvts)
 
     pitchRateAttach  = makeKnob (pitchRateSlider,  pitchRateLabel,  ParamIDs::pitchLfoRate);
     pitchDepthAttach = makeKnob (pitchDepthSlider, pitchDepthLabel, ParamIDs::pitchLfoDepth);
+
+    // Grey out Pitch Rate knob when Sync is active.
+    auto pitchSyncVisual = [this]
+    {
+        const bool synced = pitchSyncButton.getToggleState();
+        const float a = synced ? 0.35f : 1.0f;
+        pitchRateSlider.setAlpha (a);
+        pitchRateLabel .setAlpha (a);
+        pitchRateSlider.setEnabled (! synced);
+        pitchRateSlider.repaint();
+
+        const float divA = synced ? 1.0f : 0.35f;
+        pitchSyncDivBox.setAlpha (divA);
+        pitchSyncDivBox.setEnabled (synced);
+    };
+    pitchSyncButton.onStateChange = pitchSyncVisual;
+    pitchSyncVisual();
 }
 
 void MagixxPanel::paint (juce::Graphics& g)

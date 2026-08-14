@@ -57,7 +57,7 @@ StutterPanel::StutterPanel (juce::AudioProcessorValueTreeState& apvts)
     // Len LFO modulation indicator — overlays the Len knob.
     lenLfoModIndicator.setStyle (LfoModIndicator::Style::RimTip);
     lenLfoModIndicator.setModType (LfoModIndicator::ModType::Additive);
-    lenLfoModIndicator.setPointerColour (SuomiLookAndFeel::kModIndicatorFx);
+    lenLfoModIndicator.setPointerColour (juce::Colour (0xffff8800));
     lenLfoModIndicator.setDestinationRange (0.0f, 1.0f);
     addAndMakeVisible (lenLfoModIndicator);
 

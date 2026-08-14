@@ -162,6 +162,59 @@ private:
     juce::Image scaledImage;
 };
 
+// Full-screen overlay showing the signal path flowchart, dismissed with an X button.
+struct SignalPathOverlay : public juce::Component
+{
+    SignalPathOverlay()
+    {
+        sourceImage = juce::ImageCache::getFromMemory (
+            BinaryData::signal_path_simple_png, BinaryData::signal_path_simple_pngSize);
+
+        closeButton.setButtonText ("X");
+        closeButton.onClick = [this] { setVisible (false); };
+        addAndMakeVisible (closeButton);
+
+        setVisible (false);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colours::black.withAlpha (0.92f));
+
+        if (! scaledImage.isValid())
+            return;
+
+        const int x = (getWidth()  - scaledImage.getWidth())  / 2;
+        const int y = (getHeight() - scaledImage.getHeight()) / 2;
+        g.drawImageAt (scaledImage, x, y);
+    }
+
+    void resized() override
+    {
+        constexpr int btnSize = 30;
+        closeButton.setBounds (getWidth() - btnSize - 8, 8, btnSize, btnSize);
+
+        if (sourceImage.isValid() && getWidth() > 0 && getHeight() > 0)
+        {
+            const float scale = juce::jmin ((float) (getWidth()  - 20) / (float) sourceImage.getWidth(),
+                                            (float) (getHeight() - 20) / (float) sourceImage.getHeight());
+            scaledImage = sourceImage.rescaled (juce::roundToInt (sourceImage.getWidth()  * scale),
+                                                juce::roundToInt (sourceImage.getHeight() * scale),
+                                                juce::Graphics::highResamplingQuality);
+        }
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        setVisible (false);
+    }
+
+private:
+    juce::Image      sourceImage;
+    juce::Image      scaledImage;
+    juce::TextButton closeButton;
+};
+
 class PluginEditor : public juce::AudioProcessorEditor,
                      private juce::AudioProcessorValueTreeState::Listener
 {
@@ -171,6 +224,7 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    void mouseUp (const juce::MouseEvent&) override;
 
 private:
     PluginProcessor& processor;
@@ -186,6 +240,7 @@ private:
     juce::Label        titleLabel;
     juce::Label        betaLabel;
     LogoButton         logoButton;
+    juce::Label        contactLabel;
     juce::ToggleButton zcButton          { "ZC" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> zcAttach;
     juce::TextButton   loadButton        { "Load Sample" };
@@ -274,6 +329,8 @@ private:
         juce::Rectangle<int> getDialogBounds() const;
     };
     std::unique_ptr<DefaultConfirmOverlay> defaultConfirmOverlay;
+
+    SignalPathOverlay signalPathOverlay;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginEditor)
 };

@@ -40,6 +40,24 @@ LfoPanel::LfoPanel (juce::AudioProcessorValueTreeState& apvts)
     addAndMakeVisible (syncDivBox);
     syncDivAttach = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
         apvts, ParamIDs::lfoSyncDiv, syncDivBox);
+
+    // Grey out Rate knob when Sync is active.
+    auto syncVisual = [this]
+    {
+        const bool synced = syncButton.getToggleState();
+        const float a = synced ? 0.35f : 1.0f;
+        rateSlider.setAlpha (a);
+        rateLabel .setAlpha (a);
+        rateSlider.setEnabled (! synced);
+        rateSlider.repaint();
+
+        const float divA = synced ? 1.0f : 0.35f;
+        syncDivBox  .setAlpha (divA);
+        syncDivLabel.setAlpha (divA);
+        syncDivBox  .setEnabled (synced);
+    };
+    syncButton.onStateChange = syncVisual;
+    syncVisual();
 }
 
 void LfoPanel::resized()

@@ -7,12 +7,21 @@ SidechainPanel::SidechainPanel (juce::AudioProcessorValueTreeState& apvts)
     : apvtsRef (apvts)
 {
     // ── Mode selector ─────────────────────────────────────────────────────────
-    modeBox.addItem ("Sidechain",      1);
+    modeBox.addItem ("Sidechain Off",  1);
     modeBox.addItem ("Sidechain Pre",  2);
     modeBox.addItem ("Sidechain Post", 3);
     addAndMakeVisible (modeBox);
     modeAttach = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
         apvts, ParamIDs::sidechainMode, modeBox);
+
+    // Show "Sidechain" on the button when off, but "Sidechain Off" in the dropdown list.
+    modeBox.onChange = [this]
+    {
+        if (modeBox.getSelectedId() == 1)
+            modeBox.setText ("Sidechain", juce::dontSendNotification);
+    };
+    if (modeBox.getSelectedId() == 1)
+        modeBox.setText ("Sidechain", juce::dontSendNotification);
 
     // ── Division ──────────────────────────────────────────────────────────────
     divLabel.setJustificationType (juce::Justification::centredLeft);

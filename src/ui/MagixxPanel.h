@@ -88,7 +88,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> pitchDepthAttach;
 
     // ── Velocity LFO ─────────────────────────────────────────────────────────
-    juce::Label    velLfoTitle    { {}, "Velocity LFO" };
+    juce::Label    velLfoTitle    { {}, "MIDI Velocity LFO" };
 
     juce::Label  velProbLabel  { {}, "Prob" };
     juce::Slider velProbSlider;

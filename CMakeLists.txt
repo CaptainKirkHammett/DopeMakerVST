@@ -12,12 +12,12 @@ CPMAddPackage(
     GIT_TAG 7.0.12
 )
 
-juce_add_binary_data(SuomiSamplerBinaryData SOURCES DOPEsmall.png Inconsolata.ttf Inconsolata-Bold.ttf "Kirna - Glitter2000 cover for vst.png" om.png alleye.png spuge2.png 02780.png)
+juce_add_binary_data(SuomiSamplerBinaryData SOURCES DOPEsmall.png Inconsolata.ttf Inconsolata-Bold.ttf "Kirna - Glitter2000 cover for vst.png" om.png alleye.png spuge2.png 02780.png signal_path_simple.png)
 
 juce_add_plugin(SuomiSampler
-    COMPANY_NAME                "SuomiAudio"
-    PLUGIN_MANUFACTURER_CODE    "SuAu"
-    PLUGIN_CODE                 "Ssmr"
+    COMPANY_NAME                "Dope Science"
+    PLUGIN_MANUFACTURER_CODE    "DOPE"
+    PLUGIN_CODE                 "DpMk"
     FORMATS                     VST3 AU
     IS_SYNTH                    TRUE
     NEEDS_MIDI_INPUT            TRUE

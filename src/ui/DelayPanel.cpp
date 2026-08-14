@@ -145,6 +145,43 @@ DelayPanel::DelayPanel (juce::AudioProcessorValueTreeState& apvts)
     mixLfoDepthSlider.getProperties().set ("centreTextKnob", juce::var ("Amt"));
     mixLfoDepthLabel .setVisible (false);
 
+    // Grey out Mix LFO Rate knob when Mix LFO Sync is active.
+    auto mixLfoSyncVisual = [this]
+    {
+        const bool synced = mixLfoSyncButton.getToggleState();
+        const float a = synced ? 0.35f : 1.0f;
+        mixLfoRateSlider.setAlpha (a);
+        mixLfoRateSlider.setEnabled (! synced);
+        mixLfoRateSlider.repaint();
+
+        const float divA = synced ? 1.0f : 0.35f;
+        mixLfoDivBox.setAlpha (divA);
+        mixLfoDivBox.setEnabled (synced);
+    };
+    mixLfoSyncButton.onStateChange = mixLfoSyncVisual;
+    mixLfoSyncVisual();
+
+    // Grey out L/R time knobs when Delay Tempo Sync is active (division boxes used instead).
+    auto delaySyncVisual = [this]
+    {
+        const bool synced = syncButton.getToggleState();
+        const float a = synced ? 0.35f : 1.0f;
+        timeLSlider.setAlpha (a);
+        timeRSlider.setAlpha (a);
+        timeLSlider.setEnabled (! synced);
+        timeRSlider.setEnabled (! synced);
+        timeLSlider.repaint();
+        timeRSlider.repaint();
+
+        const float divA = synced ? 1.0f : 0.35f;
+        timeLDivBox.setAlpha (divA);
+        timeRDivBox.setAlpha (divA);
+        timeLDivBox.setEnabled (synced);
+        timeRDivBox.setEnabled (synced);
+    };
+    syncButton.onStateChange = delaySyncVisual;
+    delaySyncVisual();
+
     envAmtAttach = makeKnob (envAmtSlider, envAmtLabel, ParamIDs::envDelayAmt);
     envAmtSlider.getProperties().set ("fxKnob",   false);
     envAmtSlider.getProperties().set ("gateKnob", true);

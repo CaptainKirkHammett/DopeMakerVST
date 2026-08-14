@@ -48,6 +48,8 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     titleLabel.setText ("Dope Maker VST", juce::dontSendNotification);
     titleLabel.setFont (juce::Font (93.31f, juce::Font::bold));  // 15 % smaller than original 109.78 f
     titleLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff));
+    titleLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    titleLabel.addMouseListener (this, false);
     uiRoot.addAndMakeVisible (titleLabel);
 
     betaLabel.setText ("Beta v0.2780.0.1", juce::dontSendNotification);
@@ -58,6 +60,14 @@ PluginEditor::PluginEditor (PluginProcessor& p)
 
     uiRoot.addAndMakeVisible (logoButton);
 
+    contactLabel.setText ("Contact", juce::dontSendNotification);
+    contactLabel.setFont (juce::Font (16.0f, juce::Font::italic));
+    contactLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff).withAlpha (0.7f));
+    contactLabel.setJustificationType (juce::Justification::centredRight);
+    contactLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    contactLabel.addMouseListener (this, false);
+    uiRoot.addAndMakeVisible (contactLabel);
+
     zcButton.getProperties().set ("fxButton", true);
     zcButton.setTooltip ("ZC Mode\n\n"
                          "OFF  Shared zero-crossing: both channels snap to the same (earliest) zero-crossing "
@@ -65,7 +75,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
                          "ON   Per-channel zero-crossing: each channel independently finds its own nearest "
                          "zero-crossing at the start and end boundaries. Tighter click suppression on stereo "
                          "samples with very different L/R waveforms, but may introduce a small timing offset "
-                         "between channels.");
+                         "between channels. Spugedelic Stereo Mode.");
     zcAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         p.apvts, ParamIDs::zcPerChannel, zcButton);
     uiRoot.addAndMakeVisible (zcButton);
@@ -274,6 +284,8 @@ PluginEditor::PluginEditor (PluginProcessor& p)
         juce::URL ("https://msha.ke/dopescience").launchInDefaultBrowser();
     };
     uiRoot.addAndMakeVisible (coverArtClickArea);
+
+    uiRoot.addChildComponent (signalPathOverlay);
 }
 
 PluginEditor::~PluginEditor()
@@ -283,6 +295,23 @@ PluginEditor::~PluginEditor()
             processor.apvts.removeParameterListener (rap->getParameterID(), this);
 
     setLookAndFeel (nullptr);
+}
+
+void PluginEditor::mouseUp (const juce::MouseEvent& e)
+{
+    if (e.eventComponent == &contactLabel)
+    {
+        // Built from parts at runtime to avoid a plain-text email in the binary.
+        juce::String addr;
+        addr << "ulle" << "." << "kir" << "@" << "gmail" << "." << "com";
+        juce::URL ("mailto:" + addr).launchInDefaultBrowser();
+    }
+    else if (e.eventComponent == &titleLabel)
+    {
+        signalPathOverlay.setBounds (uiRoot.getLocalBounds());
+        signalPathOverlay.setVisible (true);
+        signalPathOverlay.toFront (true);
+    }
 }
 
 void PluginEditor::paint (juce::Graphics& g)
@@ -329,6 +358,8 @@ void PluginEditor::resized()
         defaultButton   .setBounds (zcCol.removeFromTop (btnH).reduced (3, 2));
     }
     logoButton.setBounds  (header.reduced (4));
+    // "Contact" at the same vertical position and font size as betaLabel, right-aligned next to logo.
+    contactLabel.setBounds (logoButton.getRight() - 80, betaLabel.getY(), 75, 18);
 
     // ── Waveform strip ────────────────────────────────────────────────────────
     auto waveRow = area.removeFromTop (120);

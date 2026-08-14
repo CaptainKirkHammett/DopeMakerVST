@@ -13,7 +13,7 @@ PresetManagerPanel::PresetManagerPanel (PresetManager& pm)
     {
         const auto name = presetBox.getText();
         if (name.isNotEmpty())
-            nameEditor.setText (name, juce::dontSendNotification);
+            onLoad (name);
     };
     addAndMakeVisible (presetBox);
 
