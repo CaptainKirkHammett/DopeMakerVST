@@ -176,6 +176,17 @@ namespace ParamIDs
     inline constexpr const char* sidechainCurve     = "sidechainCurve";
     inline constexpr const char* sidechainFall      = "sidechainFall";  // 0=instant drop, 1=shaped fall
 
+    // --- Reverb ---
+    inline constexpr const char* reverbEnabled  = "reverbEnabled";
+    inline constexpr const char* reverbRoomSize = "reverbRoomSize";
+    inline constexpr const char* reverbDamping  = "reverbDamping";
+    inline constexpr const char* reverbWidth    = "reverbWidth";
+    inline constexpr const char* reverbMix      = "reverbMix";
+    inline constexpr const char* reverbReverse  = "reverbReverse";
+    inline constexpr const char* reverbRevLen   = "reverbRevLen";
+    inline constexpr const char* reverbRevSync  = "reverbRevSync";
+    inline constexpr const char* reverbRevDiv   = "reverbRevDiv";
+
     // --- Highcut (LP) ---
     inline constexpr const char* highcutEnabled = "highcutEnabled";
     inline constexpr const char* highcutFreq    = "highcutFreq";   // Hz, 200–20000

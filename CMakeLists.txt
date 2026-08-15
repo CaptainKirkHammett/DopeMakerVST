@@ -44,6 +44,7 @@ target_sources(SuomiSampler PRIVATE
     src/dsp/FilterProcessor.cpp
     src/dsp/DistortionProcessor.cpp
     src/dsp/FlangerProcessor.cpp
+    src/dsp/ReverbProcessor.cpp
     src/dsp/PhaserProcessor.cpp
     src/dsp/PingPongDelayProcessor.cpp
     src/dsp/LfoProcessor.cpp
@@ -64,6 +65,7 @@ target_sources(SuomiSampler PRIVATE
     src/ui/FilterPanel.cpp
     src/ui/DistortionPanel.cpp
     src/ui/FlangerPanel.cpp
+    src/ui/ReverbPanel.cpp
     src/ui/PhaserPanel.cpp
     src/ui/DelayPanel.cpp
     src/ui/DuckFaderButton.cpp

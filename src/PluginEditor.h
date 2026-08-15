@@ -14,6 +14,7 @@
 #include "ui/DistortionPanel.h"
 #include "ui/FlangerPanel.h"
 #include "ui/PhaserPanel.h"
+#include "ui/ReverbPanel.h"
 #include "ui/DelayPanel.h"
 #include "ui/GateControllerPanel.h"
 #include "ui/SidechainPanel.h"
@@ -285,6 +286,7 @@ private:
     EnvFollowerPanel    envFollowerPanel;
     DistortionPanel  distPanel;
     FlangerPanel    flangerPanel;
+    ReverbPanel     reverbPanel;
     PhaserPanel     phaserPanel;
     HighcutPanel    highcutPanel;
     DelayPanel      delayPanel;

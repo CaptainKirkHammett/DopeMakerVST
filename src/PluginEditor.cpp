@@ -19,6 +19,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
       envFollowerPanel   (p.apvts),
       distPanel          (p.apvts),
       flangerPanel       (p.apvts),
+      reverbPanel        (p.apvts),
       phaserPanel        (p.apvts),
       highcutPanel       (p.apvts),
       delayPanel         (p.apvts),
@@ -35,10 +36,10 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     // uiRoot is always 1050 × 980.  A scale transform is applied to it in
     // resized() so that all child components scale uniformly without any
     // individual layout code needing to know about the current scale factor.
-    uiRoot.setBounds (0, 0, 1050, 1048);
+    uiRoot.setBounds (0, 0, 1050, 1108);
     addAndMakeVisible (uiRoot);
 
-    setSize (1050, 1048);
+    setSize (1050, 1108);
 
     // Cover art added first so it paints behind all other children.
     uiRoot.addAndMakeVisible (coverArt);
@@ -190,6 +191,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
                                  &p.flangerProc.lfoDelayDelta,
                                  &p.flangerProc.lfoFullDepth,
                                  p.apvts.getRawParameterValue (ParamIDs::flangerDelayStart));
+    uiRoot.addAndMakeVisible (reverbPanel);
     uiRoot.addAndMakeVisible (phaserPanel);
     phaserPanel.setModSources  (&p.gateController.currentStepLevelForUI,
                                  p.apvts.getRawParameterValue (ParamIDs::envPhaserAmt),
@@ -233,7 +235,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     {
         const float scales[] = { 1.0f, 0.85f, 0.75f, 0.60f, 0.5f };
         const float s = scales[juce::jlimit (0, 4, scaleBox.getSelectedId() - 1)];
-        setSize (juce::roundToInt (1050.0f * s), juce::roundToInt (1048.0f * s));
+        setSize (juce::roundToInt (1050.0f * s), juce::roundToInt (1108.0f * s));
         scaleBox.setSelectedId (0, juce::dontSendNotification);
     };
     uiRoot.addAndMakeVisible (scaleBox);
@@ -326,7 +328,7 @@ void PluginEditor::resized()
     // host has given us (set by scaleBox via setSize).  Every child component
     // is a child of uiRoot, so the single transform scales everything uniformly
     // — no individual panel layout code needs to know the current scale.
-    const float scale = getHeight() / 1048.0f;
+    const float scale = getHeight() / 1108.0f;
     uiRoot.setTransform (juce::AffineTransform::scale (scale));
 
     // All layout coordinates below are in uiRoot's fixed 1050 × 980 space.
@@ -432,12 +434,11 @@ void PluginEditor::resized()
         distPanel       .setBounds (distRow);
     }
     flangerPanel.setBounds (area.removeFromTop (fxRowH));
+    phaserPanel .setBounds (area.removeFromTop (fxRowH));
     {
-        // Use 59 px — same as each half of the delay right column — so that
-        // Highcut knobs are identical in size to Lowcut and Clip.
-        auto phaserRow = area.removeFromTop (59);
-        highcutPanel.setBounds (phaserRow.removeFromRight (270));
-        phaserPanel .setBounds (phaserRow);
+        auto reverbRow = area.removeFromTop (fxRowH);
+        highcutPanel.setBounds (reverbRow.removeFromRight (270));
+        reverbPanel .setBounds (reverbRow);
     }
     {
         auto delayRow = area.removeFromTop (118);
@@ -451,14 +452,14 @@ void PluginEditor::resized()
     // Spuge overlay: centred on the spuge slot in the flanger row (local x≈859, uiRoot y≈773).
     // Sized to the spuge slot so resized() computes the correct fit scale; the component draws
     // at 2× that scale, so it bleeds into neighbouring rows underneath them.
-    spugeOverlay.setBounds (1050 - 278, 805, 278, 72);
+    spugeOverlay.setBounds (1050 - 278, 865, 278, 72);
 
     // Cover art: centred between Amt knob (x=686) and Clip enable button (x=784), bottom-anchored.
     // Underlaps nearby controls — rendered behind all panels (added first to uiRoot).
     //   Centre = (686 + 784) / 2 = 735
     //   Left   = 735 - 196/2 = 637
     //   Bot    = 980  (bottom of uiRoot)
-    coverArt.setBounds (735 - 196 / 2 - 15, 1048 - 354 + 20, 196, 354);
+    coverArt.setBounds (735 - 196 / 2 - 15, 1108 - 354 + 20, 196, 354);
     // Click area: only the visible image portion, narrowed to avoid overlapping knobs.
     coverArtClickArea.setBounds (coverArt.getX() + 55, coverArt.getBottom() - 160,
                                  coverArt.getWidth() - 110, 160);
