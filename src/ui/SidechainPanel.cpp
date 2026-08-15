@@ -14,14 +14,7 @@ SidechainPanel::SidechainPanel (juce::AudioProcessorValueTreeState& apvts)
     modeAttach = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
         apvts, ParamIDs::sidechainMode, modeBox);
 
-    // Show "Sidechain" on the button when off, but "Sidechain Off" in the dropdown list.
-    modeBox.onChange = [this]
-    {
-        if (modeBox.getSelectedId() == 1)
-            modeBox.setText ("Sidechain", juce::dontSendNotification);
-    };
-    if (modeBox.getSelectedId() == 1)
-        modeBox.setText ("Sidechain", juce::dontSendNotification);
+    // Display text and dimming are handled together in applyDim (below).
 
     // ── Division ──────────────────────────────────────────────────────────────
     divLabel.setJustificationType (juce::Justification::centredLeft);
@@ -57,9 +50,13 @@ SidechainPanel::SidechainPanel (juce::AudioProcessorValueTreeState& apvts)
 
     // ── Dim controls when Off ─────────────────────────────────────────────────
     // Called on every mode change and once at construction to set the initial state.
+    // getSelectedId() returns 0 when nothing is selected yet (e.g. during
+    // construction before the attachment pushes the initial value), so treat
+    // both 0 and 1 as "off".
     auto applyDim = [this]
     {
-        const bool  isOff = (modeBox.getSelectedId() == 1);
+        const int   selId = modeBox.getSelectedId();
+        const bool  isOff = (selId <= 1);
         const float a     = isOff ? 0.35f : 1.0f;
         mixSlider     .setAlpha (a);  preDelaySlider.setAlpha (a);
         riseSlider    .setAlpha (a);  curveSlider   .setAlpha (a);
@@ -76,6 +73,9 @@ SidechainPanel::SidechainPanel (juce::AudioProcessorValueTreeState& apvts)
         modeBox.setColour (juce::ComboBox::textColourId,
                            isOff ? juce::Colours::white.withAlpha (0.55f)
                                  : juce::Colours::white);
+        // Show "Sidechain" on the button when off, but the full mode name when active.
+        if (isOff)
+            modeBox.setText ("Sidechain", juce::dontSendNotification);
         repaint();
     };
     modeBox.onChange = applyDim;

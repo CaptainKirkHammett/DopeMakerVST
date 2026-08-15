@@ -339,6 +339,42 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         juce::String(), juce::AudioProcessorParameter::genericParameter,
         [] (float v, int) { return juce::String (v, 3); }));
 
+    // --- Reverb ---
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        ParamIDs::reverbEnabled, "Reverb Enable", false));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        ParamIDs::reverbRoomSize, "Reverb Room Size",
+        juce::NormalisableRange<float> (0.0f, 1.0f), 0.5f,
+        juce::String(), juce::AudioProcessorParameter::genericParameter,
+        [] (float v, int) { return juce::String (v, 3); }));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        ParamIDs::reverbDamping, "Reverb Damping",
+        juce::NormalisableRange<float> (0.0f, 1.0f), 0.5f,
+        juce::String(), juce::AudioProcessorParameter::genericParameter,
+        [] (float v, int) { return juce::String (v, 3); }));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        ParamIDs::reverbWidth, "Reverb Width",
+        juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f,
+        juce::String(), juce::AudioProcessorParameter::genericParameter,
+        [] (float v, int) { return juce::String (v, 3); }));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        ParamIDs::reverbMix, "Reverb Mix",
+        juce::NormalisableRange<float> (0.0f, 1.0f), 0.3f,
+        juce::String(), juce::AudioProcessorParameter::genericParameter,
+        [] (float v, int) { return juce::String (v, 3); }));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        ParamIDs::reverbReverse, "Reverb Reverse", false));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        ParamIDs::reverbRevLen, "Reverb Reverse Length",
+        juce::NormalisableRange<float> (100.0f, 4000.0f, 1.0f, 0.4f), 500.0f,
+        "ms"));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        ParamIDs::reverbRevSync, "Reverb Reverse Sync", false));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        ParamIDs::reverbRevDiv, "Reverb Reverse Division",
+        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        4));   // default: 1/4
+
     // --- Phaser ---
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         ParamIDs::phaserEnabled, "Phaser Enable", false));
@@ -685,6 +721,7 @@ void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     distProc.prepare    (spec);
     flangerProc.prepare  (spec);
     phaserProc.prepare   (spec);
+    reverbProc.prepare   (spec);
     delayProc.prepare    (spec);
     highcutProc.prepare  (spec);
     lowcutProc.prepare   (spec);
@@ -1145,6 +1182,28 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         const float mix     = juce::jlimit (0.0f, 1.0f, baseMix + envLevel * phaserEnvAmt);
         phaserProc.setParameters (rate, depth, fb, stages, centre, mix);
         phaserProc.process (ctx);
+    }
+
+    if (apvts.getRawParameterValue (ParamIDs::reverbEnabled)->load() > 0.5f)
+    {
+        const float roomSize  = apvts.getRawParameterValue (ParamIDs::reverbRoomSize)->load();
+        const float damping   = apvts.getRawParameterValue (ParamIDs::reverbDamping)->load();
+        const float width     = apvts.getRawParameterValue (ParamIDs::reverbWidth)->load();
+        const float mix       = apvts.getRawParameterValue (ParamIDs::reverbMix)->load();
+        const bool  reverse   = apvts.getRawParameterValue (ParamIDs::reverbReverse)->load() > 0.5f;
+
+        float revLenMs = apvts.getRawParameterValue (ParamIDs::reverbRevLen)->load();
+        if (apvts.getRawParameterValue (ParamIDs::reverbRevSync)->load() > 0.5f)
+        {
+            const auto div = static_cast<SyncDivision> (
+                static_cast<int> (apvts.getRawParameterValue (ParamIDs::reverbRevDiv)->load()));
+            // Convert division to ms: Hz = beatsPerSec / divBeats, period = 1/Hz.
+            const float hz = LfoProcessor::syncDivisionToHz (getCurrentBpm(), div);
+            revLenMs = (hz > 0.0f) ? (1000.0f / hz) : 500.0f;
+        }
+
+        reverbProc.setParameters (roomSize, damping, width, mix, reverse, revLenMs);
+        reverbProc.process (ctx);
     }
 
     if (apvts.getRawParameterValue (ParamIDs::delayEnabled)->load() > 0.5f)

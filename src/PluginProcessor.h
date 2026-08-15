@@ -10,6 +10,7 @@
 #include "dsp/DistortionProcessor.h"
 #include "dsp/FlangerProcessor.h"
 #include "dsp/PhaserProcessor.h"
+#include "dsp/ReverbProcessor.h"
 #include "dsp/PingPongDelayProcessor.h"
 #include "dsp/LfoProcessor.h"
 #include "dsp/GateController.h"
@@ -85,6 +86,7 @@ public:
     StutterProcessor       stutterProc;
     PingPongDelayProcessor delayProc;
     FlangerProcessor       flangerProc;
+    ReverbProcessor        reverbProc;
     PhaserProcessor        phaserProc;
     GateController         gateController;
     SidechainProcessor     sidechainProc;
