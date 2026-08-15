@@ -65,6 +65,13 @@ void FilterProcessor::updateCoefficients()
             break;
         case FilterMode::BandPass:
             coeffs = juce::dsp::IIR::Coefficients<float>::makeBandPass (sr, fc, q);
+            // makeBandPass peak gain is 1/Q, so scale the numerator by Q
+            // to maintain unity gain at the center frequency.
+            {
+                auto* raw = coeffs->getRawCoefficients();
+                for (int i = 0; i < 3; ++i)
+                    raw[i] *= q;
+            }
             break;
         default:
             return;

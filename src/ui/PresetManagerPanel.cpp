@@ -102,9 +102,23 @@ void PresetManagerPanel::onDelete()
     const auto name = presetBox.getText();
     if (name.isEmpty())
         return;
-    presetManager.deletePreset (name);
-    refreshPresetList();
-    nameEditor.setText ("New Preset", juce::dontSendNotification);
+
+    auto options = juce::MessageBoxOptions()
+                       .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                       .withTitle ("Delete Preset")
+                       .withMessage ("Are you sure you want to delete \"" + name + "\"?")
+                       .withButton ("Delete")
+                       .withButton ("Cancel")
+                       .withAssociatedComponent (this);
+
+    juce::AlertWindow::showAsync (options, [this, name] (int result)
+    {
+        if (result != 1)
+            return;
+        presetManager.deletePreset (name);
+        refreshPresetList();
+        nameEditor.setText ("New Preset", juce::dontSendNotification);
+    });
 }
 
 void PresetManagerPanel::navigateBy (int delta)
