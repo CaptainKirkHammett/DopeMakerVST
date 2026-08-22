@@ -62,6 +62,15 @@ int StutterProcessor::constrainFastDiv (int candidate, float lfoLow, float lfoHi
 {
     const bool isFast = (candidate >= 3);  // 3=1/32, 4=1/64
 
+    // When the user locks both range ends to the same division, honour it
+    // unconditionally — the constraint only makes sense for randomised ranges.
+    if (juce::roundToInt (lfoLow) == juce::roundToInt (lfoHigh))
+    {
+        consecutiveFast_ = 0;
+        prevDivIdx_ = candidate;
+        return candidate;
+    }
+
     if (!isFast)
     {
         // Slow division — reset the fast counter.

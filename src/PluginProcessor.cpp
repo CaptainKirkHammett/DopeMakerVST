@@ -568,7 +568,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         juce::StringArray { "Hard", "Soft" }, 0));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::clipAmt, "Clip Amount",
-        juce::NormalisableRange<float> (0.0f, 1.0f), 0.5f,
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.0f, 0.5f), 0.5f,
         juce::String(), juce::AudioProcessorParameter::genericParameter,
         [] (float v, int) { return juce::String (v, 3); }));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
@@ -849,7 +849,12 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             {
                 gateController.reset();
                 arpProc.reset();
-                engine->forceAllVoicesOff();
+
+                // Only hard-kill voices on initial play start.  On transport
+                // loops/jumps the DAW re-sends MIDI — hard-killing here would
+                // cut audio to zero in one sample, causing an audible click.
+                if (playStarted)
+                    engine->forceAllVoicesOff();
             }
 
             lastPpqPosition = (ppqPosition >= 0.0) ? ppqPosition + blockDurationPpq : -1.0;
@@ -1024,21 +1029,17 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         stereoFieldSource.pushSamples (buffer);
     }
 
-    // Limiter — applied after stereo shaping so the gain knob controls the post-limited level.
+    // Limiter — always runs so its internal envelope stays primed;
+    // at amount=0 the threshold sits at 0 dB (no limiting, pass-through).
     {
         const float amount = apvts.getRawParameterValue (ParamIDs::limiterAmount)->load();
-        if (amount > 0.0f)
-        {
-            limiterProc.setAmount (amount);
-            limiterProc.process (ctx);
-            limiterGainReductionDb.store (
-                limiterProc.gainReductionDb.load (std::memory_order_relaxed),
-                std::memory_order_relaxed);
-        }
-        else
-        {
-            limiterGainReductionDb.store (0.0f, std::memory_order_relaxed);
-        }
+        limiterProc.setAmount (amount);
+        limiterProc.process (ctx);
+        limiterGainReductionDb.store (
+            amount > 0.0f
+                ? limiterProc.gainReductionDb.load (std::memory_order_relaxed)
+                : 0.0f,
+            std::memory_order_relaxed);
     }
 
     // Gain — applied sample-by-sample via SmoothedValue so automation is zipper-free.
@@ -1182,6 +1183,18 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         const float mix     = juce::jlimit (0.0f, 1.0f, baseMix + envLevel * phaserEnvAmt);
         phaserProc.setParameters (rate, depth, fb, stages, centre, mix);
         phaserProc.process (ctx);
+
+        // Transparent soft-clamp to tame peaks from extreme phaser settings.
+        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+        {
+            auto* samples = buffer.getWritePointer (ch);
+            for (int i = 0; i < buffer.getNumSamples(); ++i)
+            {
+                const float x = samples[i];
+                if (x > 1.0f || x < -1.0f)
+                    samples[i] = std::tanh (x);
+            }
+        }
     }
 
     if (apvts.getRawParameterValue (ParamIDs::reverbEnabled)->load() > 0.5f)
@@ -1331,11 +1344,13 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
             // Capture pre-clip peaks and the effective ceiling for the UI overlay.
             // Hard clip: threshold lowers from 1.0→0.05 as amount increases.
-            // Soft clip: tanh asymptote approaches 1/drive = 1/(1+amount*19).
+            // Soft clip: dry/wet blend — ceiling is 1.0 at amount=0,
+            //            trending toward 1/drive at amount=1.
             const int   n       = buffer.getNumSamples();
-            const float ceiling = (modeIdx == 0)
+            const float softCeil = 1.0f / (1.0f + amount * 19.0f);
+            const float ceiling  = (modeIdx == 0)
                 ? (1.0f - 0.95f * amount)
-                : (1.0f / (1.0f + amount * 19.0f));
+                : (1.0f + amount * (softCeil - 1.0f));
             clipPrePeakL .store (buffer.getMagnitude (0, 0, n), std::memory_order_relaxed);
             clipPrePeakR .store (buffer.getMagnitude (1, 0, n), std::memory_order_relaxed);
             clipThreshold.store (ceiling,  std::memory_order_relaxed);

@@ -31,7 +31,11 @@ private:
 
     // Stored so process() can compute GR without re-deriving it.
     float currentThresholdDb { 0.0f };
+    float lastSetThresholdDb { 0.0f };
 
     // Per-sample EMA of input amplitude — used as the level signal for GR display.
     float avgInput { 0.0f };
+
+    // Track previous amount so we can detect bypass→active transitions.
+    float previousAmount { 0.0f };
 };

@@ -5,6 +5,7 @@ void LimiterProcessor::prepare (const juce::dsp::ProcessSpec& spec)
     lastBlockSize = static_cast<int> (spec.maximumBlockSize);
 
     limiter.prepare (spec);
+    limiter.setThreshold (0.0f);
     limiter.setRelease (80.0f);  // 80 ms release — tight but not pumpy
 
     outputGainSmoothed.reset (spec.sampleRate, 0.02);  // 20 ms ramp
@@ -16,12 +17,22 @@ void LimiterProcessor::setAmount (float amount)
     // Threshold: 0 dB at amount=0, -24 dB at amount=1.
     const float thresholdDb = amount * -24.0f;
     currentThresholdDb = thresholdDb;
-    limiter.setThreshold (thresholdDb);
+
+    // Only call setThreshold when it actually changed — calling it every
+    // block recalculates internal compressor coefficients and can cause
+    // micro-discontinuities that manifest as clicks.
+    if (std::abs (thresholdDb - lastSetThresholdDb) > 0.01f)
+    {
+        limiter.setThreshold (thresholdDb);
+        lastSetThresholdDb = thresholdDb;
+    }
 
     // Output compensation: reduce by up to -7.2 dB at max amount so that the
     // limited signal does not end up louder than the dry signal.
     const float compensationDb = amount * -7.2f;
     outputGainSmoothed.setTargetValue (juce::Decibels::decibelsToGain (compensationDb));
+
+    previousAmount = amount;
 }
 
 void LimiterProcessor::process (juce::dsp::ProcessContextReplacing<float>& context)

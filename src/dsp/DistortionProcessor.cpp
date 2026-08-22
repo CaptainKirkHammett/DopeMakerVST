@@ -214,15 +214,16 @@ void DistortionProcessor::process (juce::dsp::ProcessContextReplacing<float>& co
     if (currentMode == DistMode::RingModulation)
     {
         // Drive knob maps to oscillator frequency: 50 Hz (drive=0) → 5000 Hz (drive=1).
-        const float freqHz  = 50.0f * std::pow (100.0f, drive);
-        const float phaseInc = juce::MathConstants<float>::twoPi
-                               * freqHz / static_cast<float> (ringModSampleRate);
-
-        // Advance drive smoother unconditionally so it stays in sync on mode changes.
-        for (int s = 0; s < numSamples; ++s) driveSmoothed.getNextValue();
+        // Use driveSmoothed per-sample so step-controller modulation doesn't
+        // cause abrupt frequency jumps (which are heard as clicks).
+        const float invSr = 1.0f / static_cast<float> (ringModSampleRate);
 
         for (int s = 0; s < numSamples; ++s)
         {
+            const float d       = driveSmoothed.getNextValue();
+            const float freqHz  = 50.0f * std::pow (100.0f, d);
+            const float phaseInc = juce::MathConstants<float>::twoPi * freqHz * invSr;
+
             const float osc = std::sin (ringModPhase);
             ringModPhase += phaseInc;
             if (ringModPhase >= juce::MathConstants<float>::twoPi)

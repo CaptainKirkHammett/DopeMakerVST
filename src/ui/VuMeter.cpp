@@ -185,27 +185,31 @@ void VuMeterComponent::drawClipOverlay (juce::Graphics& g,
 
     // threshY: screen Y of the clip ceiling (lower Y = higher on screen = louder).
     const int threshY     = area.getY() + juce::roundToInt ((1.0f - threshFill) * totalH);
-    const int zoneH       = threshY - area.getY();   // height of the "ceiling zone" above threshold
     const bool isClipping = preClipPeak > threshold * 1.001f;
 
+    // Ensure the overlay zone is always visible (at least 6 px tall).
+    const int minZoneH    = 6;
+    const int zoneTop     = juce::jmin (threshY - minZoneH, area.getY());
+    const int zoneBottom  = threshY;
+    const int zoneH       = zoneBottom - zoneTop;
+
     if (zoneH <= 0)
-        return;   // ceiling at or above the top of the bar — nothing to draw
+        return;
 
     // Gradient: opaque orange at the top, transparent at the threshold.
     const juce::uint32 topColour = isClipping ? 0x88ff8800u : 0x3dff8800u;
     juce::ColourGradient grad (juce::Colour (topColour),
-                               0.0f, static_cast<float> (area.getY()),
+                               0.0f, static_cast<float> (zoneTop),
                                juce::Colour (0x00ff8800),
-                               0.0f, static_cast<float> (threshY),
+                               0.0f, static_cast<float> (zoneBottom),
                                false);
     g.setGradientFill (grad);
-    g.fillRect (area.getX(), area.getY(), area.getWidth(), zoneH);
+    g.fillRect (area.getX(), zoneTop, area.getWidth(), zoneH);
 
-    // Dashed threshold line.
+    // Solid threshold line (2 px) — always clearly visible when clip is active.
     g.setColour (isClipping ? juce::Colour (0xddff9900)
-                            : juce::Colour (0x66ff9900));
-    for (int x = area.getX(); x < area.getRight(); x += 8)
-        g.fillRect (x, threshY, juce::jmin (4, area.getRight() - x), 1);
+                            : juce::Colour (0x88ff9900));
+    g.fillRect (area.getX(), threshY - 1, area.getWidth(), 2);
 
     // Pre-clip peak marker — shows how far above the ceiling the raw signal reached.
     if (isClipping && preFill > threshFill)

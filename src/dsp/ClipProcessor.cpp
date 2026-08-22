@@ -55,11 +55,11 @@ void ClipProcessor::process (juce::dsp::ProcessContextReplacing<float>& ctx)
             }
             else
             {
-                // tanh(x·drive)/drive is always ≤ |x|, so it never boosts.
-                // At amount=0: drive=1, output ≈ input.
+                // Blend dry→tanh so amount=0 is fully clean.
                 // At amount=1: drive=20, peaks compressed toward ±0.05.
                 const float drive = 1.0f + amount * 19.0f;
-                out = std::tanh (in * drive) / drive;
+                const float wet   = std::tanh (in * drive) / drive;
+                out = in + amount * (wet - in);
             }
             p[s] = out * makeup;
         }
