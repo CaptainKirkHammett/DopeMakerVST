@@ -25,6 +25,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
       delayPanel         (p.apvts),
       lowcutPanel        (p.apvts),
       clipPanel          (p.apvts),
+      suppressorPanel    (p.apvts),
       presetManagerPanel (p.presetManager)
 {
     // Apply custom LookAndFeel to this editor and all its children.
@@ -107,7 +108,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
             // Panel anchors just below the header buttons, aligned to the right.
             const auto btnBounds = presetButton.getBoundsInParent();
             const int  panelW    = 480;
-            const int  panelH    = 130;
+            const int  panelH    = 380;
             const int  panelX    = juce::jmax (0, btnBounds.getRight() - panelW);
             const int  panelY    = btnBounds.getBottom() + 4;
             presetManagerPanel.setCurrentSampleFile (processor.getLastLoadedFile());
@@ -116,6 +117,11 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     };
     uiRoot.addAndMakeVisible (presetButton);
 
+    prevPresetButton.onClick = [this] { presetManagerPanel.navigateBy (-1); };
+    nextPresetButton.onClick = [this] { presetManagerPanel.navigateBy ( 1); };
+    uiRoot.addAndMakeVisible (prevPresetButton);
+    uiRoot.addAndMakeVisible (nextPresetButton);
+
     // Wire up the panel so loading a preset also refreshes the waveform.
     presetManagerPanel.onPresetLoaded = [this] (const juce::File& sampleFile)
     {
@@ -123,6 +129,8 @@ PluginEditor::PluginEditor (PluginProcessor& p)
         {
             processor.loadSampleFile (sampleFile);
             waveformDisplay.setFile (sampleFile);
+            waveformDisplay.setPresetName (processor.presetManager.getCurrentPresetName());
+            presetManagerPanel.setCurrentSampleFile (sampleFile);
         }
     };
     uiRoot.addChildComponent (presetManagerPanel);
@@ -135,13 +143,17 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     waveformDisplay.onFileDrop = [this] (const juce::File& f) {
         processor.loadSampleFile (f);
         waveformDisplay.setFile (f);
+        presetManagerPanel.setCurrentSampleFile (f);
     };
     uiRoot.addAndMakeVisible (waveformDisplay);
 
     // If a sample was already loaded (e.g. project restored via setStateInformation
     // before this editor was constructed), rebuild the thumbnail now.
     if (const auto& f = processor.getLastLoadedFile(); f.existsAsFile())
+    {
         waveformDisplay.setFile (f);
+        waveformDisplay.setPresetName (processor.presetManager.getCurrentPresetName());
+    }
     else if (processor.sampleMissing)
         waveformDisplay.setMissingSample (processor.missingSampleName);
 
@@ -218,6 +230,8 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     lowcutPanel.setSpectrumSource (&processor.lowcutSpectrumSource);
     uiRoot.addAndMakeVisible (lowcutPanel);
     uiRoot.addAndMakeVisible (clipPanel);
+
+    uiRoot.addAndMakeVisible (suppressorPanel);
 
     // Parameter display — shows name + value of last tweaked control.
     uiRoot.addAndMakeVisible (paramDisplay);
@@ -349,7 +363,12 @@ void PluginEditor::resized()
         auto col = header.removeFromRight (130);
         const int btnH = col.getHeight() / 3;
         loadButton  .setBounds (col.removeFromTop (btnH).reduced (3, 2));
-        presetButton.setBounds (col.removeFromTop (btnH).reduced (3, 2));
+        {
+            auto row = col.removeFromTop (btnH).reduced (3, 2);
+            prevPresetButton.setBounds (row.removeFromLeft (22));
+            nextPresetButton.setBounds (row.removeFromRight (22));
+            presetButton    .setBounds (row);
+        }
         scaleBox    .setBounds (col.removeFromTop (btnH).reduced (3, 2));
 
         // ZC toggle and folder button share a 46 px column to the left of the main button column.
@@ -434,31 +453,32 @@ void PluginEditor::resized()
         distPanel       .setBounds (distRow);
     }
     flangerPanel.setBounds (area.removeFromTop (fxRowH));
-    phaserPanel .setBounds (area.removeFromTop (fxRowH));
+    {
+        auto phaserRow = area.removeFromTop (fxRowH);
+        highcutPanel.setBounds (phaserRow.removeFromRight (270));
+        phaserPanel .setBounds (phaserRow);
+    }
     {
         auto reverbRow = area.removeFromTop (fxRowH);
-        highcutPanel.setBounds (reverbRow.removeFromRight (270));
-        reverbPanel .setBounds (reverbRow);
+        lowcutPanel.setBounds (reverbRow.removeFromRight (270));
+        reverbPanel.setBounds (reverbRow);
     }
     {
         auto delayRow = area.removeFromTop (118);
         auto rightCol = delayRow.removeFromRight (270);
         const int halfH = rightCol.getHeight() / 2;
-        lowcutPanel.setBounds (rightCol.removeFromTop (halfH));
-        clipPanel  .setBounds (rightCol);
-        delayPanel .setBounds (delayRow);
+        clipPanel      .setBounds (rightCol.removeFromTop (halfH));
+        suppressorPanel.setBounds (rightCol);
+        delayPanel     .setBounds (delayRow);
     }
 
     // Spuge overlay: centred on the spuge slot in the flanger row (local x≈859, uiRoot y≈773).
     // Sized to the spuge slot so resized() computes the correct fit scale; the component draws
     // at 2× that scale, so it bleeds into neighbouring rows underneath them.
-    spugeOverlay.setBounds (1050 - 278, 865, 278, 72);
+    spugeOverlay.setBounds (1050 - 278, 805, 278, 72);
 
-    // Cover art: centred between Amt knob (x=686) and Clip enable button (x=784), bottom-anchored.
+    // Cover art: centred between Amt knob and Clip enable button, bottom-anchored.
     // Underlaps nearby controls — rendered behind all panels (added first to uiRoot).
-    //   Centre = (686 + 784) / 2 = 735
-    //   Left   = 735 - 196/2 = 637
-    //   Bot    = 980  (bottom of uiRoot)
     coverArt.setBounds (735 - 196 / 2 - 15, 1108 - 354 + 20, 196, 354);
     // Click area: only the visible image portion, narrowed to avoid overlapping knobs.
     coverArtClickArea.setBounds (coverArt.getX() + 55, coverArt.getBottom() - 160,
@@ -494,6 +514,7 @@ void PluginEditor::onLoadButtonClicked()
             const juce::File f = results[0];
             processor.loadSampleFile (f);
             waveformDisplay.setFile (f);
+            presetManagerPanel.setCurrentSampleFile (f);
         });
 }
 
@@ -571,4 +592,6 @@ void PluginEditor::resetAllParametersToDefault()
         if (auto* paramWithID = dynamic_cast<juce::RangedAudioParameter*> (param))
             paramWithID->setValueNotifyingHost (paramWithID->getDefaultValue());
     }
+
+    waveformDisplay.setPresetName ({});
 }

@@ -189,14 +189,20 @@ void SamplerEngine::noteOn (int midiNote, float velocity)
     }
 
     // Build per-note params from template + LFO offset.
+    // startPos / endPos stay at the marker positions so the loop range is stable.
+    // initialReadPos carries the LFO-modulated position so only the first read
+    // position varies per note.
     VoiceParams p = voiceParamsTemplate;
+
+    // Resolve random direction per note.
+    if (p.randomDir)
+        p.reversed = rng.nextBool();
+
     const float lfoOffset = lfoStartOffset.load (std::memory_order_relaxed);
-    // For reversed playback the voice reads end→start, so the LFO modulates endPos
-    // (the actual start of playback) rather than startPos.
     if (p.reversed)
-        p.endPos   = juce::jlimit (p.startPos + 0.001f, p.endPos, p.endPos - lfoOffset);
+        p.initialReadPos = juce::jlimit (p.startPos + 0.001f, p.endPos, p.endPos - lfoOffset);
     else
-        p.startPos = juce::jlimit (p.startPos, p.endPos - 0.001f, p.startPos + lfoOffset);
+        p.initialReadPos = juce::jlimit (p.startPos, p.endPos - 0.001f, p.startPos + lfoOffset);
 
     // Slicer: divide [startPos, endPos] into N equal slices; each MIDI note plays one slice.
     if (slicerEnabled.load (std::memory_order_relaxed))

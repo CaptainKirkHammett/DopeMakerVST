@@ -28,6 +28,7 @@
 #include "ui/PresetManagerPanel.h"
 #include "ui/GranulizerPanel.h"
 #include "ui/StutterPanel.h"
+#include "ui/SuppressorPanel.h"
 
 // Non-interactive image overlay — scales to fit its bounds, passes all mouse events through.
 struct CoverArtComponent : public juce::Component
@@ -246,6 +247,8 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> zcAttach;
     juce::TextButton   loadButton        { "Load Sample" };
     juce::TextButton   presetButton      { "Presets" };
+    juce::TextButton   prevPresetButton  { "<" };
+    juce::TextButton   nextPresetButton  { ">" };
     juce::TextButton   openFolderButton  { "DIR" };
     juce::TextButton   defaultButton     { "INIT" };
     ParameterDisplay   paramDisplay;
@@ -292,6 +295,8 @@ private:
     DelayPanel      delayPanel;
     LowcutPanel     lowcutPanel;
     ClipPanel       clipPanel;
+
+    SuppressorPanel suppressorPanel;
 
     // Decorative overlay: spans phaserRow + delayRow, X between Amt knob and Clip enable button.
     CoverArtComponent coverArt;

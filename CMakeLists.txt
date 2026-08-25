@@ -81,6 +81,8 @@ target_sources(SuomiSampler PRIVATE
     src/ui/LfoModIndicator.cpp
     src/ui/VelocityMeterComponent.cpp
     src/dsp/SidechainProcessor.cpp
+    src/dsp/ResonanceSuppressorProcessor.cpp
+    src/ui/SuppressorPanel.cpp
 )
 
 target_compile_definitions(SuomiSampler PUBLIC

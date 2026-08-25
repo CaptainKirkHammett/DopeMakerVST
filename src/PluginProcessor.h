@@ -22,6 +22,7 @@
 #include "dsp/ClipProcessor.h"
 #include "dsp/ToneFilterProcessor.h"
 #include "dsp/GranulizerProcessor.h"
+#include "dsp/ResonanceSuppressorProcessor.h"
 #include "dsp/StutterProcessor.h"
 #include "PresetManager.h"
 #include "SpectrumSource.h"
@@ -154,6 +155,24 @@ private:
 
     // Peak-normalize gain — smoothed to avoid clicks when toggling.
     juce::SmoothedValue<float> normalizeSmoothed { 1.0f };
+
+    // FX enable crossfade smoothers — 5ms ramp to eliminate clicks on toggle.
+    juce::SmoothedValue<float> filterEnableSmoothed  { 0.0f };
+    juce::SmoothedValue<float> distEnableSmoothed    { 0.0f };
+    juce::SmoothedValue<float> flangerEnableSmoothed { 0.0f };
+    juce::SmoothedValue<float> phaserEnableSmoothed  { 0.0f };
+    juce::SmoothedValue<float> reverbEnableSmoothed  { 0.0f };
+    juce::SmoothedValue<float> delayEnableSmoothed   { 0.0f };
+    juce::SmoothedValue<float> highcutEnableSmoothed { 0.0f };
+    juce::SmoothedValue<float> lowcutEnableSmoothed  { 0.0f };
+    juce::SmoothedValue<float> clipEnableSmoothed    { 0.0f };
+    juce::SmoothedValue<float> suppressorEnableSmoothed { 0.0f };
+
+    // Shared scratch buffer for dry/wet crossfade during FX enable transitions.
+    juce::AudioBuffer<float> fxDryBuffer;
+
+    // Resonance suppressor — last in chain, after clip.
+    ResonanceSuppressorProcessor suppressorProc;
 
     // Pre-FX stereo width — first in chain so limiter and gain act on shaped stereo.
     StereoProcessor stereoProc;

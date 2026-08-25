@@ -26,6 +26,7 @@ public:
     void reset   ();
 
     // Process the buffer in-place.  Call from the audio thread only.
+    // ppqPosition: current DAW playhead in quarter notes (pass < 0 to free-run on BPM only).
     void process (juce::AudioBuffer<float>& buffer,
                   double       bpm,
                   SyncDivision division,
@@ -33,7 +34,8 @@ public:
                   float        rise01,      // 0.01..1 — fraction of remaining period used for rise
                   float        curve,       // 0..1 — rise shape (0=slow, 0.5=linear, 1=fast)
                   float        fall01,      // 0..1 — fall span at end of cycle (0=instant, 1=full span)
-                  float        mix);        // 0..1 — dry/wet
+                  float        mix,         // 0..1 — dry/wet
+                  double       ppqPosition = -1.0);  // DAW transport position
 
 private:
     double sampleRate  { 44100.0 };

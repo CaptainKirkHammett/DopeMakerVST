@@ -58,14 +58,39 @@ void SidechainProcessor::process (juce::AudioBuffer<float>& buffer,
                                    float        rise01,
                                    float        curve,
                                    float        fall01,
-                                   float        mix)
+                                   float        mix,
+                                   double       ppqPosition)
 {
     if (mix <= 0.0f)
         return;
 
+    // Division lengths in quarter notes — mirrors LfoProcessor::kDivBeats.
+    static constexpr double kDivBeats[] = {
+        1.0 / 8.0,   // 1/32
+        1.0 / 4.0,   // 1/16
+        1.0 / 2.0,   // 1/8
+        3.0 / 4.0,   // 1/8D
+        1.0,         // 1/4
+        1.5,         // 1/4D
+        2.0,         // 1/2
+        3.0,         // 1/2D
+        4.0,         // 1/1
+        6.0,         // 1/1D
+        8.0          // 2/1
+    };
+
+    const double divBeats = kDivBeats[static_cast<int> (division)];
+
     const float  hz            = LfoProcessor::syncDivisionToHz (bpm, division);
     const double periodSamples = (hz > 0.0f) ? (sampleRate / hz) : sampleRate;
     const double phaseInc      = 1.0 / periodSamples;
+
+    // Lock phase to DAW transport when PPQ is available.
+    const bool   hasTransport  = ppqPosition >= 0.0;
+    const double ppqPerSample  = (bpm > 0.0) ? (bpm / (60.0 * sampleRate)) : 0.0;
+
+    if (hasTransport)
+        phase = std::fmod (ppqPosition, divBeats) / divBeats;
 
     const int n  = buffer.getNumSamples();
     const int nC = buffer.getNumChannels();
@@ -81,7 +106,16 @@ void SidechainProcessor::process (juce::AudioBuffer<float>& buffer,
         for (int ch = 0; ch < nC; ++ch)
             buffer.getWritePointer (ch)[s] *= gainSmoothed;
 
-        phase += phaseInc;
+        if (hasTransport)
+        {
+            // Advance phase using PPQ increment for sample-accurate grid lock.
+            phase += ppqPerSample / divBeats;
+        }
+        else
+        {
+            phase += phaseInc;
+        }
+
         if (phase >= 1.0)
             phase -= 1.0;
     }

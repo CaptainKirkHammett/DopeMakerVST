@@ -26,6 +26,10 @@ public:
     // Load a new file into the thumbnail. Also clears any missing-sample warning.
     void setFile (const juce::File& file);
 
+    // Set the active preset name so the badge can show it separately from the sample filename.
+    // Pass an empty string to clear (e.g. when loading a raw sample without a preset).
+    void setPresetName (const juce::String& name);
+
     // Show a "sample missing" warning overlay. Cleared automatically by setFile().
     void setMissingSample (const juce::String& filename);
 
@@ -117,7 +121,11 @@ private:
     static constexpr float kMarkerEpsilon { 0.005f };
 
     juce::String   loadedFileName;               // displayed in the lower-right corner
+    juce::String   presetName;                   // set when loaded via preset manager
     juce::File     loadedFile;                   // full path — used to open parent directory on click
+
+    // Returns the sample filename with the preset prefix stripped (if any).
+    juce::String getDisplaySampleName() const;
     bool           missingFile      { false };
     juce::String   missingFileName;
     juce::String   searchStatus;    // shown after a folder search ("not found" or empty)

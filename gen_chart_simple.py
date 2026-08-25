@@ -121,6 +121,9 @@ box(y, 'Voice Mix Sum', 'engine');       y += BH + GAP + 6
 y = hdr(y, 'PRE-FX')
 arr(y - 2, y + 3)
 
+box(y, 'Pre-Gain', 'always');            y += BH + GAP; arr(y - GAP, y)
+box(y, 'Normalize', 'optional');         y += BH + GAP; arr(y - GAP, y)
+box(y, 'Granulizer', 'optional');        y += BH + GAP; arr(y - GAP, y)
 box(y, 'Pre-FX VU Meter', 'utility');    y += BH + GAP; arr(y - GAP, y)
 box(y, 'Envelope Follower', 'utility');  y += BH + GAP + 6
 
@@ -132,20 +135,24 @@ box(y, 'Stereo Width', 'always');        y += BH + GAP; arr(y - GAP, y)
 box(y, 'Limiter', 'always');             y += BH + GAP; arr(y - GAP, y)
 box(y, 'Gain', 'always');                y += BH + GAP; arr(y - GAP, y)
 box(y, 'Sidechain \u2014 Pre-FX', 'optional'); y += BH + GAP; arr(y - GAP, y)
+box(y, 'Stutter', 'optional');           y += BH + GAP; arr(y - GAP, y)
 box(y, 'Filter', 'optional');            y += BH + GAP; arr(y - GAP, y)
 box(y, 'Distortion', 'optional');        y += BH + GAP; arr(y - GAP, y)
 box(y, 'Flanger', 'optional');           y += BH + GAP; arr(y - GAP, y)
 box(y, 'Phaser', 'optional');            y += BH + GAP; arr(y - GAP, y)
+box(y, 'Reverb', 'optional');            y += BH + GAP; arr(y - GAP, y)
 box(y, 'Ping-Pong Delay', 'optional');   y += BH + GAP; arr(y - GAP, y)
 box(y, 'Sidechain \u2014 Post-FX', 'optional'); y += BH + GAP; arr(y - GAP, y)
 box(y, 'Highcut', 'optional');           y += BH + GAP; arr(y - GAP, y)
 box(y, 'Lowcut', 'optional');            y += BH + GAP; arr(y - GAP, y)
-box(y, 'Clip', 'optional');              y += BH + GAP + 6
+box(y, 'Clip', 'optional');              y += BH + GAP; arr(y - GAP, y)
+box(y, 'AutoEQ', 'optional');            y += BH + GAP + 6
 
 # ── OUTPUT ───────────────────────────────────────────────────────────────────
 y = hdr(y, 'OUTPUT')
 arr(y - 2, y + 3)
 
+box(y, 'Post-Gain', 'always');           y += BH + GAP; arr(y - GAP, y)
 box(y, 'Post-FX VU Meter', 'utility');   y += BH + GAP; arr(y - GAP, y)
 box(y, 'Audio Output', 'output');        y += BH
 

@@ -10,8 +10,8 @@ void WaveformDisplay::BadgeOverlay::paint (juce::Graphics& g)
     constexpr int   kPadX   = 6;
     constexpr float kFontSz = 11.0f;
 
-    const juce::Font font (juce::Font::getDefaultMonospacedFontName(), kFontSz, juce::Font::plain);
-    g.setFont (font);
+    const juce::Font fontRegular (juce::Font::getDefaultMonospacedFontName(), kFontSz, juce::Font::plain);
+    const juce::Font fontBold    (juce::Font::getDefaultMonospacedFontName(), kFontSz, juce::Font::bold);
 
     // --- Filename badge (lower-right) ---
     if (owner.loadedFileName.isNotEmpty())
@@ -20,8 +20,33 @@ void WaveformDisplay::BadgeOverlay::paint (juce::Graphics& g)
         g.setColour (juce::Colour (0xcc0d1a2e));
         g.fillRoundedRectangle (badge.toFloat(), 3.0f);
 
-        g.setColour (juce::Colours::white.withAlpha (0.90f));
-        g.drawText (owner.loadedFileName, badge.reduced (kPadX, 0), juce::Justification::centred, true);
+        const auto sampleName = owner.getDisplaySampleName();
+        const auto inner = badge.reduced (kPadX, 0);
+
+        if (owner.presetName.isNotEmpty())
+        {
+            // Two-part display: "PresetName sampleName" — regular + bold.
+            const juce::String presetPart = owner.presetName + " ";
+            const int presetW = fontRegular.getStringWidth (presetPart);
+
+            g.setColour (juce::Colours::white.withAlpha (0.65f));
+            g.setFont (fontRegular);
+            g.drawText (presetPart, inner.getX(), inner.getY(), presetW, inner.getHeight(),
+                        juce::Justification::centredLeft, false);
+
+            g.setColour (juce::Colours::white.withAlpha (0.95f));
+            g.setFont (fontBold);
+            g.drawText (sampleName, inner.getX() + presetW, inner.getY(),
+                        inner.getWidth() - presetW, inner.getHeight(),
+                        juce::Justification::centredLeft, true);
+        }
+        else
+        {
+            // No preset — show just the sample name in bold.
+            g.setColour (juce::Colours::white.withAlpha (0.95f));
+            g.setFont (fontBold);
+            g.drawText (sampleName, inner, juce::Justification::centred, true);
+        }
     }
 
     // --- Normalize toggle badge (above filename badge, right-aligned) ---
@@ -50,9 +75,21 @@ juce::Rectangle<int> WaveformDisplay::BadgeOverlay::getBadgeBounds() const
     constexpr int   kMargin = 4;
     constexpr float kFontSz = 11.0f;
 
-    juce::Font f (juce::Font::getDefaultMonospacedFontName(), kFontSz, juce::Font::plain);
-    const int textW = f.getStringWidth (owner.loadedFileName);
-    const int textH = static_cast<int> (f.getHeight());
+    const juce::Font fontRegular (juce::Font::getDefaultMonospacedFontName(), kFontSz, juce::Font::plain);
+    const juce::Font fontBold    (juce::Font::getDefaultMonospacedFontName(), kFontSz, juce::Font::bold);
+
+    int textW;
+    if (owner.presetName.isNotEmpty())
+    {
+        const juce::String presetPart = owner.presetName + " ";
+        textW = fontRegular.getStringWidth (presetPart)
+              + fontBold.getStringWidth (owner.getDisplaySampleName());
+    }
+    else
+    {
+        textW = fontBold.getStringWidth (owner.loadedFileName);
+    }
+    const int textH = static_cast<int> (fontRegular.getHeight());
 
     const int bgW = textW + kPadX * 2;
     const int bgH = textH + kPadY * 2;
@@ -255,11 +292,23 @@ WaveformDisplay::~WaveformDisplay()
     thumbnail.removeChangeListener (this);
 }
 
+void WaveformDisplay::setPresetName (const juce::String& name)
+{
+    presetName = name;
+    badgeOverlay.repaint();
+}
+
+juce::String WaveformDisplay::getDisplaySampleName() const
+{
+    return loadedFileName;
+}
+
 void WaveformDisplay::setFile (const juce::File& file)
 {
     missingFile     = false;
     missingFileName = {};
     searchStatus    = {};
+    presetName      = {};
     searchFolderButton.setVisible (false);
     thumbnail.setSource (new juce::FileInputSource (file));
     loadedFileName = file.getFileName();

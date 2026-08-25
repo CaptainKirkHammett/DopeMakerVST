@@ -21,10 +21,14 @@ enum class LoopMode { Forward, PingPong };
 
 struct VoiceParams
 {
-    float startPos        { 0.0f };   // 0–1 normalised
-    float endPos          { 1.0f };   // 0–1 normalised
+    float startPos        { 0.0f };   // 0–1 normalised (marker position — loop boundary)
+    float endPos          { 1.0f };   // 0–1 normalised (marker position — loop boundary)
+    float initialReadPos  { -1.0f };  // 0–1 normalised; where playback actually begins
+                                      // (may differ from startPos/endPos due to LFO).
+                                      // Negative means "use startPos / endPos as before".
     bool  perChannelZC    { false };  // true = independent ZC per channel; false = shared earliest ZC
     bool  reversed        { false };  // play end→start
+    bool  randomDir       { false };  // true = direction randomised per note in engine
     bool  looping         { false };
     LoopMode loopMode     { LoopMode::Forward };
     int   rootNote        { 48 };     // MIDI note for 1:1 pitch
@@ -162,6 +166,14 @@ private:
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> deClickGain;
     bool deClickingOut { false };
     static constexpr int kDeClickSamples { 441 };  // ~10 ms at 44100 Hz
+
+    // Loop crossfade: when the read head wraps or bounces at a loop boundary,
+    // a shadow head continues the old trajectory while the real head starts the
+    // new one.  The output crossfades from shadow→real over kLoopXfadeSamples.
+    static constexpr int kLoopXfadeSamples { 256 };  // ~6 ms at 44100 Hz
+    double loopXfadePos       { 0.0 };   // shadow read position
+    int    loopXfadeCounter   { 0 };     // countdown; 0 = inactive
+    bool   loopXfadeFwd       { true };  // shadow direction (for ping-pong)
 
     AdsrEnvelope volumeEnv;
     AdsrEnvelope pitchEnv;

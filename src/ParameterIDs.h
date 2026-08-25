@@ -234,6 +234,10 @@ namespace ParamIDs
     inline constexpr const char* preGainDb       = "preGainDb";       // Input gain before any processing (dB)
     inline constexpr const char* postGainDb      = "postGainDb";      // Output gain after entire FX chain (dB)
 
+    // --- Resonance Suppressor (AutoEQ) ---
+    inline constexpr const char* suppressorEnabled = "suppressorEnabled";
+    inline constexpr const char* suppressorAmt     = "suppressorAmt";  // 0–1
+
     // --- Granulizer ---
     inline constexpr const char* granEnabled     = "granEnabled";
     inline constexpr const char* granAttack      = "granAttack";       // ms, grain attack (fade-in) time

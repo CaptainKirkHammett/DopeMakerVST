@@ -148,14 +148,37 @@ void SamplerVoice::startNote (int note, float vel,
         }
     }
 
+    // Determine initial read position.  If initialReadPos is set (>= 0), it
+    // carries an LFO-modulated start that may differ from the loop boundaries.
+    // ZC-snap it independently and clamp within the loop region.
     if (p.reversed)
     {
-        readPos         = static_cast<double> (snappedEndFrame);
+        if (p.initialReadPos >= 0.0f)
+        {
+            int rawInitial = static_cast<int> (totalFrames * p.initialReadPos);
+            if (sampleData != nullptr)
+                rawInitial = findNearestZeroCrossing (sampleData->buffer, rawInitial, kZcSearchRadius, false, 0);
+            readPos = static_cast<double> (juce::jlimit (snappedStartFrame, snappedEndFrame, rawInitial));
+        }
+        else
+        {
+            readPos = static_cast<double> (snappedEndFrame);
+        }
         pingPongForward = false;
     }
     else
     {
-        readPos         = static_cast<double> (snappedStartFrame);
+        if (p.initialReadPos >= 0.0f)
+        {
+            int rawInitial = static_cast<int> (totalFrames * p.initialReadPos);
+            if (sampleData != nullptr)
+                rawInitial = findNearestZeroCrossing (sampleData->buffer, rawInitial, kZcSearchRadius, true, 0);
+            readPos = static_cast<double> (juce::jlimit (snappedStartFrame, snappedEndFrame, rawInitial));
+        }
+        else
+        {
+            readPos = static_cast<double> (snappedStartFrame);
+        }
         pingPongForward = true;
     }
     active            = true;
@@ -163,6 +186,7 @@ void SamplerVoice::startNote (int note, float vel,
     stealing          = false;
     stealCountdown    = 0;
     deClickingOut     = false;
+    loopXfadeCounter  = 0;
 
     stealGain.setCurrentAndTargetValue (1.0f);
 
@@ -214,11 +238,12 @@ void SamplerVoice::stopNote (bool allowTailOff)
 
 void SamplerVoice::forceOff()
 {
-    active         = false;
-    noteHeld       = false;
-    stealing       = false;
-    stealCountdown = 0;
-    deClickingOut  = false;
+    active           = false;
+    noteHeld         = false;
+    stealing         = false;
+    stealCountdown   = 0;
+    deClickingOut    = false;
+    loopXfadeCounter = 0;
     volumeEnv.reset();
     pitchEnv.reset();
     sampleData    = nullptr;
@@ -347,23 +372,39 @@ void SamplerVoice::handleLoopBoundary()
             if (params.reversed)
             {
                 if (readPos <= startFrame)
-                    readPos = endFrame;
+                {
+                    loopXfadePos     = readPos;
+                    loopXfadeFwd     = false;
+                    loopXfadeCounter = kLoopXfadeSamples;
+                    readPos = endFrame - (startFrame - readPos);
+                }
             }
             else
             {
                 if (readPos >= endFrame)
-                    readPos = startFrame;
+                {
+                    loopXfadePos     = readPos;
+                    loopXfadeFwd     = true;
+                    loopXfadeCounter = kLoopXfadeSamples;
+                    readPos = startFrame + (readPos - endFrame);
+                }
             }
         }
         else // PingPong — direction flips at both boundaries regardless of reversed
         {
             if (pingPongForward && readPos >= endFrame)
             {
+                loopXfadePos     = readPos;
+                loopXfadeFwd     = true;
+                loopXfadeCounter = kLoopXfadeSamples;
                 readPos = endFrame - (readPos - endFrame);
                 pingPongForward = false;
             }
             else if (!pingPongForward && readPos <= startFrame)
             {
+                loopXfadePos     = readPos;
+                loopXfadeFwd     = false;
+                loopXfadeCounter = kLoopXfadeSamples;
                 readPos = startFrame + (startFrame - readPos);
                 pingPongForward = true;
             }
@@ -441,18 +482,45 @@ void SamplerVoice::renderSamples (juce::AudioBuffer<float>& outputBuffer,
         if (!active)
             break;
 
+        // Loop crossfade: blend shadow head (fading out) with real head (fading in).
+        const bool xfading = loopXfadeCounter > 0;
+        float xfadeIn = 1.0f;
+        if (xfading)
+        {
+            xfadeIn = 1.0f - static_cast<float> (loopXfadeCounter) / static_cast<float> (kLoopXfadeSamples);
+            // Equal-power crossfade for perceptually smooth transition.
+            xfadeIn = xfadeIn * xfadeIn * (3.0f - 2.0f * xfadeIn);  // smoothstep
+        }
+
         for (int ch = 0; ch < numOutputChannels; ++ch)
         {
             const int srcCh  = (numSrcChannels > 1) ? ch : 0;
             const int offset = (ch < kMaxChannels) ? chReadOffset[ch] : 0;
-            const float sample = readSampleLinear (static_cast<float> (readPos) + offset, srcCh);
-            outputBuffer.addSample (ch, startSample + s, sample * gain);
+            float out = readSampleLinear (static_cast<float> (readPos) + offset, srcCh);
+
+            if (xfading)
+            {
+                const float shadow = readSampleLinear (static_cast<float> (loopXfadePos) + offset, srcCh);
+                out = out * xfadeIn + shadow * (1.0f - xfadeIn);
+            }
+
+            outputBuffer.addSample (ch, startSample + s, out * gain);
         }
 
         if (pingPongForward)
             readPos += ratio;
         else
             readPos -= ratio;
+
+        // Advance shadow head in its original direction during crossfade.
+        if (xfading)
+        {
+            if (loopXfadeFwd)
+                loopXfadePos += ratio;
+            else
+                loopXfadePos -= ratio;
+            --loopXfadeCounter;
+        }
 
         // Guard against NaN/Inf — a corrupted readPos makes all boundary
         // comparisons fail (NaN is never >= or <=), leaving the voice stuck

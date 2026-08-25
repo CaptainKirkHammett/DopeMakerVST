@@ -15,6 +15,7 @@ SampleControlPanel::SampleControlPanel (juce::AudioProcessorValueTreeState& apvt
     // Sample direction.
     sampleDirBox.addItem ("Sample FW", 1);
     sampleDirBox.addItem ("Sample BW", 2);
+    sampleDirBox.addItem ("FW/BW Rnd", 3);
     addAndMakeVisible (sampleDirBox);
     sampleDirAttach = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
         apvts, ParamIDs::sampleDirection, sampleDirBox);

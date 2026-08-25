@@ -64,7 +64,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         ParamIDs::zcPerChannel, "ZC Per Channel", false));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::sampleDirection, "Sample Direction",
-        juce::StringArray { "Sample FW", "Sample BW" }, 0));
+        juce::StringArray { "Sample FW", "Sample BW", "FW/BW Rnd" }, 0));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::loopMode, "Loop Mode",
         juce::StringArray { "No Loop", "Forward", "Ping-Pong" }, 0));
@@ -577,6 +577,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         juce::String(), juce::AudioProcessorParameter::genericParameter,
         [] (float v, int) { return juce::String (v, 1) + " dB"; }));
 
+    // --- Resonance Suppressor (AutoEQ) ---
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        ParamIDs::suppressorEnabled, "AutoEQ", false));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        ParamIDs::suppressorAmt, "Suppressor Amount",
+        juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f));
+
     // --- Arpeggiator ---
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         ParamIDs::arpEnabled, "Arpeggiator Enable", false));
@@ -715,6 +722,34 @@ void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
             ? normalizeGain.load (std::memory_order_relaxed)
             : 1.0f);
 
+    // FX enable crossfade smoothers — 5ms ramp for click-free toggling.
+    constexpr double kEnableRampSec = 0.005;
+    filterEnableSmoothed .reset (sampleRate, kEnableRampSec);
+    distEnableSmoothed   .reset (sampleRate, kEnableRampSec);
+    flangerEnableSmoothed.reset (sampleRate, kEnableRampSec);
+    phaserEnableSmoothed .reset (sampleRate, kEnableRampSec);
+    reverbEnableSmoothed .reset (sampleRate, kEnableRampSec);
+    delayEnableSmoothed  .reset (sampleRate, kEnableRampSec);
+    highcutEnableSmoothed.reset (sampleRate, kEnableRampSec);
+    lowcutEnableSmoothed .reset (sampleRate, kEnableRampSec);
+    clipEnableSmoothed   .reset (sampleRate, kEnableRampSec);
+
+    filterEnableSmoothed .setCurrentAndTargetValue (apvts.getRawParameterValue (ParamIDs::filterEnabled)->load()  > 0.5f ? 1.0f : 0.0f);
+    distEnableSmoothed   .setCurrentAndTargetValue (apvts.getRawParameterValue (ParamIDs::distEnabled)->load()    > 0.5f ? 1.0f : 0.0f);
+    flangerEnableSmoothed.setCurrentAndTargetValue (apvts.getRawParameterValue (ParamIDs::flangerEnabled)->load() > 0.5f ? 1.0f : 0.0f);
+    phaserEnableSmoothed .setCurrentAndTargetValue (apvts.getRawParameterValue (ParamIDs::phaserEnabled)->load()  > 0.5f ? 1.0f : 0.0f);
+    reverbEnableSmoothed .setCurrentAndTargetValue (apvts.getRawParameterValue (ParamIDs::reverbEnabled)->load()  > 0.5f ? 1.0f : 0.0f);
+    delayEnableSmoothed  .setCurrentAndTargetValue (apvts.getRawParameterValue (ParamIDs::delayEnabled)->load()   > 0.5f ? 1.0f : 0.0f);
+    highcutEnableSmoothed.setCurrentAndTargetValue (apvts.getRawParameterValue (ParamIDs::highcutEnabled)->load() > 0.5f ? 1.0f : 0.0f);
+    lowcutEnableSmoothed .setCurrentAndTargetValue (apvts.getRawParameterValue (ParamIDs::lowcutEnabled)->load()  > 0.5f ? 1.0f : 0.0f);
+    clipEnableSmoothed   .setCurrentAndTargetValue (apvts.getRawParameterValue (ParamIDs::clipEnabled)->load()    > 0.5f ? 1.0f : 0.0f);
+
+    suppressorEnableSmoothed.reset (sampleRate, kEnableRampSec);
+    suppressorEnableSmoothed.setCurrentAndTargetValue (apvts.getRawParameterValue (ParamIDs::suppressorEnabled)->load() > 0.5f ? 1.0f : 0.0f);
+
+    // Shared scratch buffer for dry/wet crossfade during FX enable transitions.
+    fxDryBuffer.setSize (2, samplesPerBlock);
+
     stereoProc.prepare  (spec);
     limiterProc.prepare (spec);
     filterProc.prepare  (spec);
@@ -726,7 +761,8 @@ void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     highcutProc.prepare  (spec);
     lowcutProc.prepare   (spec);
     lowcutSpectrumSource.setSampleRate (sampleRate);
-    clipProc.prepare     (spec);
+    clipProc.prepare       (spec);
+    suppressorProc.prepare (spec);
     granulizerProc.prepare (sampleRate, samplesPerBlock);
     stutterProc.prepare    (sampleRate, samplesPerBlock);
     lfo.prepare            (sampleRate);
@@ -763,7 +799,13 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         vp.startPos      = apvts.getRawParameterValue (ParamIDs::sampleStartPos)->load();
         vp.endPos        = apvts.getRawParameterValue (ParamIDs::sampleEndPos)->load();
         vp.perChannelZC  = apvts.getRawParameterValue (ParamIDs::zcPerChannel)->load() > 0.5f;
-        vp.reversed      = apvts.getRawParameterValue (ParamIDs::sampleDirection)->load() > 0.5f;
+        {
+            const int dirIdx = static_cast<int> (
+                apvts.getRawParameterValue (ParamIDs::sampleDirection)->load());
+            // 0 = FW, 1 = BW, 2 = random (resolved per-note in SamplerEngine::noteOn)
+            vp.reversed    = (dirIdx == 1);
+            vp.randomDir   = (dirIdx == 2);
+        }
         {
             const int loopIdx = static_cast<int> (
                 apvts.getRawParameterValue (ParamIDs::loopMode)->load());
@@ -1069,7 +1111,8 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 apvts.getRawParameterValue (ParamIDs::sidechainRise)->load(),
                 apvts.getRawParameterValue (ParamIDs::sidechainCurve)->load(),
                 apvts.getRawParameterValue (ParamIDs::sidechainFall)->load(),
-                apvts.getRawParameterValue (ParamIDs::sidechainMix)->load());
+                apvts.getRawParameterValue (ParamIDs::sidechainMix)->load(),
+                currentPpqPosition);
         }
     }
 
@@ -1102,188 +1145,338 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             apvts.getRawParameterValue (ParamIDs::stutterLenRepeat)->load() > 0.5f);
     }
 
-    if (apvts.getRawParameterValue (ParamIDs::filterEnabled)->load() > 0.5f)
     {
-        const int   modeIdx    = static_cast<int> (apvts.getRawParameterValue (ParamIDs::filterMode)->load());
-        const float baseCutoff = apvts.getRawParameterValue (ParamIDs::filterCutoff)->load();
-        const float res        = apvts.getRawParameterValue (ParamIDs::filterResonance)->load();
-        const float envAmt     = apvts.getRawParameterValue (ParamIDs::envFilterAmt)->load();
+        filterEnableSmoothed.setTargetValue (
+            apvts.getRawParameterValue (ParamIDs::filterEnabled)->load() > 0.5f ? 1.0f : 0.0f);
+        const bool smoothing = filterEnableSmoothed.isSmoothing();
+        const bool active    = smoothing || filterEnableSmoothed.getCurrentValue() > 0.5f;
 
-        // Block-rate LFO modulating cutoff.
-        const float lfoDepth   = apvts.getRawParameterValue (ParamIDs::filterLfoDepth)->load();
-        const int   lfoWaveIdx = static_cast<int> (apvts.getRawParameterValue (ParamIDs::filterLfoWaveform)->load());
-        filterLfo.setWaveform (static_cast<LfoWaveform> (lfoWaveIdx));
-        filterLfo.setRate     (apvts.getRawParameterValue (ParamIDs::filterLfoRate)->load());
-        filterLfo.setDepth    (1.0f);   // raw [-1..+1]; depth applied manually so UI can read unscaled signal
-        filterLfo.setTempoSync (false);
-        filterLfo.advance (buffer.getNumSamples() - 1);
-        const float lfoRaw    = filterLfo.getNextSample();   // raw [-1..+1]
-        filterLfoOutput.store (lfoRaw, std::memory_order_relaxed);
-        const float lfoSample = lfoRaw * lfoDepth;           // depth-scaled [-depth..+depth]
-
-        // Gate step, audio envelope, and LFO all modulate cutoff in octaves.
-        const float afEnvAmt = apvts.getRawParameterValue (ParamIDs::afEnvFilterAmt)->load();
-        const float cutoff = juce::jlimit (20.0f, 20000.0f,
-            baseCutoff * std::pow (2.0f, envLevel * envAmt * 4.0f
-                                       + audioEnvLevel * afEnvAmt * 4.0f
-                                       + lfoSample * 4.0f));
-        filterProc.setParameters (static_cast<FilterMode> (modeIdx), cutoff, res);
-        filterProc.process (ctx);
-    }
-
-    if (apvts.getRawParameterValue (ParamIDs::distEnabled)->load() > 0.5f)
-    {
-        const int   modeIdx  = static_cast<int> (apvts.getRawParameterValue (ParamIDs::distMode)->load());
-        const float baseDrive = apvts.getRawParameterValue (ParamIDs::distDrive)->load();
-        const float envAmt   = apvts.getRawParameterValue (ParamIDs::envDistAmt)->load();
-        const float afEnvAmt = apvts.getRawParameterValue (ParamIDs::afEnvDistAmt)->load();
-        const float drive    = juce::jlimit (0.0f, 1.0f, baseDrive + envLevel * envAmt + audioEnvLevel * afEnvAmt);
-        const float output   = apvts.getRawParameterValue (ParamIDs::distOutput)->load();
-        const int   bits    = static_cast<int> (apvts.getRawParameterValue (ParamIDs::distBitDepth)->load()) + 2;  // choice index 0 = 2 bits
-        distProc.setMode       (static_cast<DistMode> (modeIdx));
-        distProc.setDrive      (drive);
-        distProc.setOutputGain (output);
-        distProc.setBitDepth   (bits);
-        distProc.setBandDrives (
-            apvts.getRawParameterValue (ParamIDs::distDriveLow) ->load(),
-            apvts.getRawParameterValue (ParamIDs::distDriveMid) ->load(),
-            apvts.getRawParameterValue (ParamIDs::distDriveHigh)->load());
-        distProc.process (ctx);
-    }
-
-    if (apvts.getRawParameterValue (ParamIDs::flangerEnabled)->load() > 0.5f)
-    {
-        const float baseMix      = apvts.getRawParameterValue (ParamIDs::flangerMix)->load();
-        const float envAmt       = apvts.getRawParameterValue (ParamIDs::envFlangerAmt)->load();
-        const float mix          = juce::jlimit (0.0f, 1.0f, baseMix + envLevel * envAmt);
-        const float baseFeedback = apvts.getRawParameterValue (ParamIDs::flangerFeedback)->load();
-        const float afEnvAmt     = apvts.getRawParameterValue (ParamIDs::afEnvFlangerAmt)->load();
-        const float feedback     = juce::jlimit (0.0f, 1.0f, baseFeedback + audioEnvLevel * afEnvAmt);
-        flangerProc.setParameters (
-            apvts.getRawParameterValue (ParamIDs::flangerRate)->load(),
-            feedback,
-            apvts.getRawParameterValue (ParamIDs::flangerDelayStart)->load(),
-            apvts.getRawParameterValue (ParamIDs::flangerDelayEnd)->load(),
-            mix);
-        flangerProc.process (ctx);
-    }
-
-    if (apvts.getRawParameterValue (ParamIDs::phaserEnabled)->load() > 0.5f)
-    {
-        const float rate    = apvts.getRawParameterValue (ParamIDs::phaserRate)->load();
-        const float depth   = apvts.getRawParameterValue (ParamIDs::phaserDepth)->load();
-        const float baseFb   = apvts.getRawParameterValue (ParamIDs::phaserFeedback)->load();
-        const float afEnvAmt = apvts.getRawParameterValue (ParamIDs::afEnvPhaserAmt)->load();
-        const float fb       = juce::jlimit (-1.0f, 1.0f, baseFb + audioEnvLevel * afEnvAmt);
-        const int   stIdx   = static_cast<int> (apvts.getRawParameterValue (ParamIDs::phaserStages)->load());
-        const int   stages  = (stIdx + 1) * 2;   // 0→2, 1→4, 2→6, 3→8, 4→10, 5→12
-        const float centre  = apvts.getRawParameterValue (ParamIDs::phaserCentreFreq)->load();
-        const float baseMix = apvts.getRawParameterValue (ParamIDs::phaserMix)->load();
-        const float phaserEnvAmt = apvts.getRawParameterValue (ParamIDs::envPhaserAmt)->load();
-        const float mix     = juce::jlimit (0.0f, 1.0f, baseMix + envLevel * phaserEnvAmt);
-        phaserProc.setParameters (rate, depth, fb, stages, centre, mix);
-        phaserProc.process (ctx);
-
-        // Transparent soft-clamp to tame peaks from extreme phaser settings.
-        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+        if (active)
         {
-            auto* samples = buffer.getWritePointer (ch);
-            for (int i = 0; i < buffer.getNumSamples(); ++i)
+            const int   modeIdx    = static_cast<int> (apvts.getRawParameterValue (ParamIDs::filterMode)->load());
+            const float baseCutoff = apvts.getRawParameterValue (ParamIDs::filterCutoff)->load();
+            const float res        = apvts.getRawParameterValue (ParamIDs::filterResonance)->load();
+            const float envAmt     = apvts.getRawParameterValue (ParamIDs::envFilterAmt)->load();
+
+            // Block-rate LFO modulating cutoff.
+            const float lfoDepth   = apvts.getRawParameterValue (ParamIDs::filterLfoDepth)->load();
+            const int   lfoWaveIdx = static_cast<int> (apvts.getRawParameterValue (ParamIDs::filterLfoWaveform)->load());
+            filterLfo.setWaveform (static_cast<LfoWaveform> (lfoWaveIdx));
+            filterLfo.setRate     (apvts.getRawParameterValue (ParamIDs::filterLfoRate)->load());
+            filterLfo.setDepth    (1.0f);   // raw [-1..+1]; depth applied manually so UI can read unscaled signal
+            filterLfo.setTempoSync (false);
+            filterLfo.advance (buffer.getNumSamples() - 1);
+            const float lfoRaw    = filterLfo.getNextSample();   // raw [-1..+1]
+            filterLfoOutput.store (lfoRaw, std::memory_order_relaxed);
+            const float lfoSample = lfoRaw * lfoDepth;           // depth-scaled [-depth..+depth]
+
+            // Gate step, audio envelope, and LFO all modulate cutoff in octaves.
+            const float afEnvAmt = apvts.getRawParameterValue (ParamIDs::afEnvFilterAmt)->load();
+            const float cutoff = juce::jlimit (20.0f, 20000.0f,
+                baseCutoff * std::pow (2.0f, envLevel * envAmt * 4.0f
+                                           + audioEnvLevel * afEnvAmt * 4.0f
+                                           + lfoSample * 4.0f));
+            filterProc.setParameters (static_cast<FilterMode> (modeIdx), cutoff, res);
+
+            if (smoothing)
             {
-                const float x = samples[i];
-                if (x > 1.0f || x < -1.0f)
-                    samples[i] = std::tanh (x);
+                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                    fxDryBuffer.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
+            }
+
+            filterProc.process (ctx);
+
+            if (smoothing)
+            {
+                for (int s = 0; s < buffer.getNumSamples(); ++s)
+                {
+                    const float wet = filterEnableSmoothed.getNextValue();
+                    const float dry = 1.0f - wet;
+                    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                        buffer.getWritePointer (ch)[s] = buffer.getReadPointer (ch)[s] * wet
+                                                       + fxDryBuffer.getReadPointer (ch)[s] * dry;
+                }
             }
         }
     }
 
-    if (apvts.getRawParameterValue (ParamIDs::reverbEnabled)->load() > 0.5f)
     {
-        const float roomSize  = apvts.getRawParameterValue (ParamIDs::reverbRoomSize)->load();
-        const float damping   = apvts.getRawParameterValue (ParamIDs::reverbDamping)->load();
-        const float width     = apvts.getRawParameterValue (ParamIDs::reverbWidth)->load();
-        const float mix       = apvts.getRawParameterValue (ParamIDs::reverbMix)->load();
-        const bool  reverse   = apvts.getRawParameterValue (ParamIDs::reverbReverse)->load() > 0.5f;
+        distEnableSmoothed.setTargetValue (
+            apvts.getRawParameterValue (ParamIDs::distEnabled)->load() > 0.5f ? 1.0f : 0.0f);
+        const bool smoothing = distEnableSmoothed.isSmoothing();
+        const bool active    = smoothing || distEnableSmoothed.getCurrentValue() > 0.5f;
 
-        float revLenMs = apvts.getRawParameterValue (ParamIDs::reverbRevLen)->load();
-        if (apvts.getRawParameterValue (ParamIDs::reverbRevSync)->load() > 0.5f)
+        if (active)
         {
-            const auto div = static_cast<SyncDivision> (
-                static_cast<int> (apvts.getRawParameterValue (ParamIDs::reverbRevDiv)->load()));
-            // Convert division to ms: Hz = beatsPerSec / divBeats, period = 1/Hz.
-            const float hz = LfoProcessor::syncDivisionToHz (getCurrentBpm(), div);
-            revLenMs = (hz > 0.0f) ? (1000.0f / hz) : 500.0f;
-        }
+            const int   modeIdx  = static_cast<int> (apvts.getRawParameterValue (ParamIDs::distMode)->load());
+            const float baseDrive = apvts.getRawParameterValue (ParamIDs::distDrive)->load();
+            const float envAmt   = apvts.getRawParameterValue (ParamIDs::envDistAmt)->load();
+            const float afEnvAmt = apvts.getRawParameterValue (ParamIDs::afEnvDistAmt)->load();
+            const float drive    = juce::jlimit (0.0f, 1.0f, baseDrive + envLevel * envAmt + audioEnvLevel * afEnvAmt);
+            const float output   = apvts.getRawParameterValue (ParamIDs::distOutput)->load();
+            const int   bits    = static_cast<int> (apvts.getRawParameterValue (ParamIDs::distBitDepth)->load()) + 2;
+            distProc.setMode       (static_cast<DistMode> (modeIdx));
+            distProc.setDrive      (drive);
+            distProc.setOutputGain (output);
+            distProc.setBitDepth   (bits);
+            distProc.setBandDrives (
+                apvts.getRawParameterValue (ParamIDs::distDriveLow) ->load(),
+                apvts.getRawParameterValue (ParamIDs::distDriveMid) ->load(),
+                apvts.getRawParameterValue (ParamIDs::distDriveHigh)->load());
 
-        reverbProc.setParameters (roomSize, damping, width, mix, reverse, revLenMs);
-        reverbProc.process (ctx);
+            if (smoothing)
+            {
+                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                    fxDryBuffer.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
+            }
+
+            distProc.process (ctx);
+
+            if (smoothing)
+            {
+                for (int s = 0; s < buffer.getNumSamples(); ++s)
+                {
+                    const float wet = distEnableSmoothed.getNextValue();
+                    const float dry = 1.0f - wet;
+                    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                        buffer.getWritePointer (ch)[s] = buffer.getReadPointer (ch)[s] * wet
+                                                       + fxDryBuffer.getReadPointer (ch)[s] * dry;
+                }
+            }
+        }
     }
 
-    if (apvts.getRawParameterValue (ParamIDs::delayEnabled)->load() > 0.5f)
     {
-        const bool  sync   = apvts.getRawParameterValue (ParamIDs::delayTempoSync)->load() > 0.5f;
-        if (sync)
+        flangerEnableSmoothed.setTargetValue (
+            apvts.getRawParameterValue (ParamIDs::flangerEnabled)->load() > 0.5f ? 1.0f : 0.0f);
+        const bool smoothing = flangerEnableSmoothed.isSmoothing();
+        const bool active    = smoothing || flangerEnableSmoothed.getCurrentValue() > 0.5f;
+
+        if (active)
         {
-            const double bpm   = getCurrentBpm();
-            const auto   lDiv  = static_cast<SyncDivision> (
-                static_cast<int> (apvts.getRawParameterValue (ParamIDs::delayTimeLDiv)->load()));
-            const auto   rDiv  = static_cast<SyncDivision> (
-                static_cast<int> (apvts.getRawParameterValue (ParamIDs::delayTimeRDiv)->load()));
-            delayProc.setTempoSync (true, bpm, lDiv, rDiv);
+            const float baseMix      = apvts.getRawParameterValue (ParamIDs::flangerMix)->load();
+            const float envAmt       = apvts.getRawParameterValue (ParamIDs::envFlangerAmt)->load();
+            const float mix          = juce::jlimit (0.0f, 1.0f, baseMix + envLevel * envAmt);
+            const float baseFeedback = apvts.getRawParameterValue (ParamIDs::flangerFeedback)->load();
+            const float afEnvAmt     = apvts.getRawParameterValue (ParamIDs::afEnvFlangerAmt)->load();
+            const float feedback     = juce::jlimit (0.0f, 1.0f, baseFeedback + audioEnvLevel * afEnvAmt);
+            flangerProc.setParameters (
+                apvts.getRawParameterValue (ParamIDs::flangerRate)->load(),
+                feedback,
+                apvts.getRawParameterValue (ParamIDs::flangerDelayStart)->load(),
+                apvts.getRawParameterValue (ParamIDs::flangerDelayEnd)->load(),
+                mix);
+
+            if (smoothing)
+            {
+                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                    fxDryBuffer.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
+            }
+
+            flangerProc.process (ctx);
+
+            if (smoothing)
+            {
+                for (int s = 0; s < buffer.getNumSamples(); ++s)
+                {
+                    const float wet = flangerEnableSmoothed.getNextValue();
+                    const float dry = 1.0f - wet;
+                    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                        buffer.getWritePointer (ch)[s] = buffer.getReadPointer (ch)[s] * wet
+                                                       + fxDryBuffer.getReadPointer (ch)[s] * dry;
+                }
+            }
         }
-        else
+    }
+
+    {
+        phaserEnableSmoothed.setTargetValue (
+            apvts.getRawParameterValue (ParamIDs::phaserEnabled)->load() > 0.5f ? 1.0f : 0.0f);
+        const bool smoothing = phaserEnableSmoothed.isSmoothing();
+        const bool active    = smoothing || phaserEnableSmoothed.getCurrentValue() > 0.5f;
+
+        if (active)
         {
-            const float tL = apvts.getRawParameterValue (ParamIDs::delayTimeLMs)->load();
-            const float tR = apvts.getRawParameterValue (ParamIDs::delayTimeRMs)->load();
-            delayProc.setDelayTimes (tL, tR);
-        }
+            const float rate    = apvts.getRawParameterValue (ParamIDs::phaserRate)->load();
+            const float depth   = apvts.getRawParameterValue (ParamIDs::phaserDepth)->load();
+            const float baseFb   = apvts.getRawParameterValue (ParamIDs::phaserFeedback)->load();
+            const float afEnvAmt = apvts.getRawParameterValue (ParamIDs::afEnvPhaserAmt)->load();
+            const float fb       = juce::jlimit (-1.0f, 1.0f, baseFb + audioEnvLevel * afEnvAmt);
+            const int   stIdx   = static_cast<int> (apvts.getRawParameterValue (ParamIDs::phaserStages)->load());
+            const int   stages  = (stIdx + 1) * 2;
+            const float centre  = apvts.getRawParameterValue (ParamIDs::phaserCentreFreq)->load();
+            const float baseMix = apvts.getRawParameterValue (ParamIDs::phaserMix)->load();
+            const float phaserEnvAmt = apvts.getRawParameterValue (ParamIDs::envPhaserAmt)->load();
+            const float mix     = juce::jlimit (0.0f, 1.0f, baseMix + envLevel * phaserEnvAmt);
+            phaserProc.setParameters (rate, depth, fb, stages, centre, mix);
 
-        delayProc.setFeedback (apvts.getRawParameterValue (ParamIDs::delayFeedback)->load() * 100.0f);
+            if (smoothing)
+            {
+                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                    fxDryBuffer.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
+            }
+
+            phaserProc.process (ctx);
+
+            // Transparent soft-clamp to tame peaks from extreme phaser settings.
+            for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+            {
+                auto* samples = buffer.getWritePointer (ch);
+                for (int i = 0; i < buffer.getNumSamples(); ++i)
+                {
+                    const float x = samples[i];
+                    if (x > 1.0f || x < -1.0f)
+                        samples[i] = std::tanh (x);
+                }
+            }
+
+            if (smoothing)
+            {
+                for (int s = 0; s < buffer.getNumSamples(); ++s)
+                {
+                    const float wet = phaserEnableSmoothed.getNextValue();
+                    const float dry = 1.0f - wet;
+                    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                        buffer.getWritePointer (ch)[s] = buffer.getReadPointer (ch)[s] * wet
+                                                       + fxDryBuffer.getReadPointer (ch)[s] * dry;
+                }
+            }
+        }
+    }
+
+    {
+        reverbEnableSmoothed.setTargetValue (
+            apvts.getRawParameterValue (ParamIDs::reverbEnabled)->load() > 0.5f ? 1.0f : 0.0f);
+        const bool smoothing = reverbEnableSmoothed.isSmoothing();
+        const bool active    = smoothing || reverbEnableSmoothed.getCurrentValue() > 0.5f;
+
+        if (active)
         {
-            const float baseMix = apvts.getRawParameterValue (ParamIDs::delayMix)->load();
-            const float delayEnvAmt = apvts.getRawParameterValue (ParamIDs::envDelayAmt)->load();
-            delayProc.setMix (juce::jlimit (0.0f, 1.0f, baseMix + envLevel * delayEnvAmt));
+            const float roomSize  = apvts.getRawParameterValue (ParamIDs::reverbRoomSize)->load();
+            const float damping   = apvts.getRawParameterValue (ParamIDs::reverbDamping)->load();
+            const float width     = apvts.getRawParameterValue (ParamIDs::reverbWidth)->load();
+            const float mix       = apvts.getRawParameterValue (ParamIDs::reverbMix)->load();
+            const bool  reverse   = apvts.getRawParameterValue (ParamIDs::reverbReverse)->load() > 0.5f;
+
+            float revLenMs = apvts.getRawParameterValue (ParamIDs::reverbRevLen)->load();
+            if (apvts.getRawParameterValue (ParamIDs::reverbRevSync)->load() > 0.5f)
+            {
+                const auto div = static_cast<SyncDivision> (
+                    static_cast<int> (apvts.getRawParameterValue (ParamIDs::reverbRevDiv)->load()));
+                const float hz = LfoProcessor::syncDivisionToHz (getCurrentBpm(), div);
+                revLenMs = (hz > 0.0f) ? (1000.0f / hz) : 500.0f;
+            }
+
+            reverbProc.setParameters (roomSize, damping, width, mix, reverse, revLenMs);
+
+            if (smoothing)
+            {
+                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                    fxDryBuffer.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
+            }
+
+            reverbProc.process (ctx);
+
+            if (smoothing)
+            {
+                for (int s = 0; s < buffer.getNumSamples(); ++s)
+                {
+                    const float wet = reverbEnableSmoothed.getNextValue();
+                    const float dry = 1.0f - wet;
+                    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                        buffer.getWritePointer (ch)[s] = buffer.getReadPointer (ch)[s] * wet
+                                                       + fxDryBuffer.getReadPointer (ch)[s] * dry;
+                }
+            }
         }
+    }
 
-        const int   fbModeIdx = static_cast<int> (apvts.getRawParameterValue (ParamIDs::delayFbFilterMode)->load());
-        const float fbCutoff  = apvts.getRawParameterValue (ParamIDs::delayFbCutoff)->load();
-        const float fbRes     = apvts.getRawParameterValue (ParamIDs::delayFbResonance)->load();
-        delayProc.setFbFilterParams (static_cast<FilterMode> (fbModeIdx), fbCutoff, fbRes);
+    {
+        delayEnableSmoothed.setTargetValue (
+            apvts.getRawParameterValue (ParamIDs::delayEnabled)->load() > 0.5f ? 1.0f : 0.0f);
+        const bool smoothing = delayEnableSmoothed.isSmoothing();
+        const bool active    = smoothing || delayEnableSmoothed.getCurrentValue() > 0.5f;
 
-        const auto  fbLfoWave = static_cast<LfoWaveform> (
-            static_cast<int> (apvts.getRawParameterValue (ParamIDs::delayFbLfoWave)->load()));
-        const float fbLfoRate  = apvts.getRawParameterValue (ParamIDs::delayFbLfoRate)->load();
-        const float fbLfoDepth = apvts.getRawParameterValue (ParamIDs::delayFbLfoDepth)->load();
-        delayProc.setFbLfoParams (fbLfoWave, fbLfoRate, fbLfoDepth);
-
-        // Mix LFO — resolve effective rate (free-run or tempo-synced).
-        const auto  mixLfoWave  = static_cast<LfoWaveform> (
-            static_cast<int> (apvts.getRawParameterValue (ParamIDs::delayMixLfoWave)->load()));
-        const float mixLfoDepth = apvts.getRawParameterValue (ParamIDs::delayMixLfoDepth)->load();
-        const bool  mixLfoSync  = apvts.getRawParameterValue (ParamIDs::delayMixLfoSync)->load() > 0.5f;
-        float mixLfoRateHz;
-        if (mixLfoSync)
+        if (active)
         {
-            const auto mixDiv = static_cast<SyncDivision> (
-                static_cast<int> (apvts.getRawParameterValue (ParamIDs::delayMixLfoDiv)->load()));
-            mixLfoRateHz = LfoProcessor::syncDivisionToHz (getCurrentBpm(), mixDiv);
+            const bool  sync   = apvts.getRawParameterValue (ParamIDs::delayTempoSync)->load() > 0.5f;
+            if (sync)
+            {
+                const double bpm   = getCurrentBpm();
+                const auto   lDiv  = static_cast<SyncDivision> (
+                    static_cast<int> (apvts.getRawParameterValue (ParamIDs::delayTimeLDiv)->load()));
+                const auto   rDiv  = static_cast<SyncDivision> (
+                    static_cast<int> (apvts.getRawParameterValue (ParamIDs::delayTimeRDiv)->load()));
+                delayProc.setTempoSync (true, bpm, lDiv, rDiv);
+            }
+            else
+            {
+                const float tL = apvts.getRawParameterValue (ParamIDs::delayTimeLMs)->load();
+                const float tR = apvts.getRawParameterValue (ParamIDs::delayTimeRMs)->load();
+                delayProc.setDelayTimes (tL, tR);
+            }
+
+            delayProc.setFeedback (apvts.getRawParameterValue (ParamIDs::delayFeedback)->load() * 100.0f);
+            {
+                const float baseMix = apvts.getRawParameterValue (ParamIDs::delayMix)->load();
+                const float delayEnvAmt = apvts.getRawParameterValue (ParamIDs::envDelayAmt)->load();
+                delayProc.setMix (juce::jlimit (0.0f, 1.0f, baseMix + envLevel * delayEnvAmt));
+            }
+
+            const int   fbModeIdx = static_cast<int> (apvts.getRawParameterValue (ParamIDs::delayFbFilterMode)->load());
+            const float fbCutoff  = apvts.getRawParameterValue (ParamIDs::delayFbCutoff)->load();
+            const float fbRes     = apvts.getRawParameterValue (ParamIDs::delayFbResonance)->load();
+            delayProc.setFbFilterParams (static_cast<FilterMode> (fbModeIdx), fbCutoff, fbRes);
+
+            const auto  fbLfoWave = static_cast<LfoWaveform> (
+                static_cast<int> (apvts.getRawParameterValue (ParamIDs::delayFbLfoWave)->load()));
+            const float fbLfoRate  = apvts.getRawParameterValue (ParamIDs::delayFbLfoRate)->load();
+            const float fbLfoDepth = apvts.getRawParameterValue (ParamIDs::delayFbLfoDepth)->load();
+            delayProc.setFbLfoParams (fbLfoWave, fbLfoRate, fbLfoDepth);
+
+            const auto  mixLfoWave  = static_cast<LfoWaveform> (
+                static_cast<int> (apvts.getRawParameterValue (ParamIDs::delayMixLfoWave)->load()));
+            const float mixLfoDepth = apvts.getRawParameterValue (ParamIDs::delayMixLfoDepth)->load();
+            const bool  mixLfoSync  = apvts.getRawParameterValue (ParamIDs::delayMixLfoSync)->load() > 0.5f;
+            float mixLfoRateHz;
+            if (mixLfoSync)
+            {
+                const auto mixDiv = static_cast<SyncDivision> (
+                    static_cast<int> (apvts.getRawParameterValue (ParamIDs::delayMixLfoDiv)->load()));
+                mixLfoRateHz = LfoProcessor::syncDivisionToHz (getCurrentBpm(), mixDiv);
+            }
+            else
+            {
+                mixLfoRateHz = apvts.getRawParameterValue (ParamIDs::delayMixLfoRate)->load();
+            }
+            delayProc.setMixLfoParams (mixLfoWave, mixLfoRateHz, mixLfoDepth);
+
+            if (mixLfoSync && currentIsPlaying && currentPpqPosition >= 0.0)
+                delayProc.syncMixLfoToTransport (currentPpqPosition, mixLfoRateHz, getCurrentBpm());
+
+            const float duckAmount = apvts.getRawParameterValue (ParamIDs::delayDuck)->load();
+            delayProc.setDuckAmount (duckAmount);
+
+            if (smoothing)
+            {
+                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                    fxDryBuffer.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
+            }
+
+            delayProc.process (ctx);
+
+            if (smoothing)
+            {
+                for (int s = 0; s < buffer.getNumSamples(); ++s)
+                {
+                    const float wet = delayEnableSmoothed.getNextValue();
+                    const float dry = 1.0f - wet;
+                    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                        buffer.getWritePointer (ch)[s] = buffer.getReadPointer (ch)[s] * wet
+                                                       + fxDryBuffer.getReadPointer (ch)[s] * dry;
+                }
+            }
         }
-        else
-        {
-            mixLfoRateHz = apvts.getRawParameterValue (ParamIDs::delayMixLfoRate)->load();
-        }
-        delayProc.setMixLfoParams (mixLfoWave, mixLfoRateHz, mixLfoDepth);
-
-        // Lock the mix LFO phase to the DAW transport every block so it starts
-        // in sync and never drifts.  Only active when sync is enabled and the
-        // transport is running; free-run mode is left untouched.
-        if (mixLfoSync && currentIsPlaying && currentPpqPosition >= 0.0)
-            delayProc.syncMixLfoToTransport (currentPpqPosition, mixLfoRateHz, getCurrentBpm());
-
-        const float duckAmount = apvts.getRawParameterValue (ParamIDs::delayDuck)->load();
-        delayProc.setDuckAmount (duckAmount);
-
-        delayProc.process (ctx);
     }
 
     // Kill-tail: always runs so prevKillTailState is never stale when delay
@@ -1309,26 +1502,79 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 apvts.getRawParameterValue (ParamIDs::sidechainRise)->load(),
                 apvts.getRawParameterValue (ParamIDs::sidechainCurve)->load(),
                 apvts.getRawParameterValue (ParamIDs::sidechainFall)->load(),
-                apvts.getRawParameterValue (ParamIDs::sidechainMix)->load());
+                apvts.getRawParameterValue (ParamIDs::sidechainMix)->load(),
+                currentPpqPosition);
         }
     }
 
     // Highcut (LP) — sits right before clip, after sidechain.
-    if (apvts.getRawParameterValue (ParamIDs::highcutEnabled)->load() > 0.5f)
     {
-        highcutProc.setParameters (true,
-            apvts.getRawParameterValue (ParamIDs::highcutFreq)->load(),
-            apvts.getRawParameterValue (ParamIDs::highcutAmt)->load());
-        highcutProc.process (ctx);
+        highcutEnableSmoothed.setTargetValue (
+            apvts.getRawParameterValue (ParamIDs::highcutEnabled)->load() > 0.5f ? 1.0f : 0.0f);
+        const bool smoothing = highcutEnableSmoothed.isSmoothing();
+        const bool active    = smoothing || highcutEnableSmoothed.getCurrentValue() > 0.5f;
+
+        if (active)
+        {
+            highcutProc.setParameters (true,
+                apvts.getRawParameterValue (ParamIDs::highcutFreq)->load(),
+                apvts.getRawParameterValue (ParamIDs::highcutAmt)->load());
+
+            if (smoothing)
+            {
+                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                    fxDryBuffer.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
+            }
+
+            highcutProc.process (ctx);
+
+            if (smoothing)
+            {
+                for (int s = 0; s < buffer.getNumSamples(); ++s)
+                {
+                    const float wet = highcutEnableSmoothed.getNextValue();
+                    const float dry = 1.0f - wet;
+                    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                        buffer.getWritePointer (ch)[s] = buffer.getReadPointer (ch)[s] * wet
+                                                       + fxDryBuffer.getReadPointer (ch)[s] * dry;
+                }
+            }
+        }
     }
 
     // Lowcut (HP) — sits right after highcut, before clip.
-    if (apvts.getRawParameterValue (ParamIDs::lowcutEnabled)->load() > 0.5f)
     {
-        lowcutProc.setParameters (false,
-            apvts.getRawParameterValue (ParamIDs::lowcutFreq)->load(),
-            apvts.getRawParameterValue (ParamIDs::lowcutAmt)->load());
-        lowcutProc.process (ctx);
+        lowcutEnableSmoothed.setTargetValue (
+            apvts.getRawParameterValue (ParamIDs::lowcutEnabled)->load() > 0.5f ? 1.0f : 0.0f);
+        const bool smoothing = lowcutEnableSmoothed.isSmoothing();
+        const bool active    = smoothing || lowcutEnableSmoothed.getCurrentValue() > 0.5f;
+
+        if (active)
+        {
+            lowcutProc.setParameters (false,
+                apvts.getRawParameterValue (ParamIDs::lowcutFreq)->load(),
+                apvts.getRawParameterValue (ParamIDs::lowcutAmt)->load());
+
+            if (smoothing)
+            {
+                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                    fxDryBuffer.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
+            }
+
+            lowcutProc.process (ctx);
+
+            if (smoothing)
+            {
+                for (int s = 0; s < buffer.getNumSamples(); ++s)
+                {
+                    const float wet = lowcutEnableSmoothed.getNextValue();
+                    const float dry = 1.0f - wet;
+                    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                        buffer.getWritePointer (ch)[s] = buffer.getReadPointer (ch)[s] * wet
+                                                       + fxDryBuffer.getReadPointer (ch)[s] * dry;
+                }
+            }
+        }
     }
 
     // Feed the post-lowcut signal to the spectrum visualiser.
@@ -1337,15 +1583,15 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // Clip — last in the chain, after sidechain/highcut/lowcut, to catch any final peaks.
     {
         const bool clipOn = apvts.getRawParameterValue (ParamIDs::clipEnabled)->load() > 0.5f;
-        if (clipOn)
+        clipEnableSmoothed.setTargetValue (clipOn ? 1.0f : 0.0f);
+        const bool smoothing = clipEnableSmoothed.isSmoothing();
+        const bool active    = smoothing || clipEnableSmoothed.getCurrentValue() > 0.5f;
+
+        if (active)
         {
             const int   modeIdx = static_cast<int> (apvts.getRawParameterValue (ParamIDs::clipMode)->load());
             const float amount  = apvts.getRawParameterValue (ParamIDs::clipAmt)->load();
 
-            // Capture pre-clip peaks and the effective ceiling for the UI overlay.
-            // Hard clip: threshold lowers from 1.0→0.05 as amount increases.
-            // Soft clip: dry/wet blend — ceiling is 1.0 at amount=0,
-            //            trending toward 1/drive at amount=1.
             const int   n       = buffer.getNumSamples();
             const float softCeil = 1.0f / (1.0f + amount * 19.0f);
             const float ceiling  = (modeIdx == 0)
@@ -1360,11 +1606,62 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             clipProc.setMode        (static_cast<ClipMode> (modeIdx));
             clipProc.setAmount      (amount);
             clipProc.setMakeupGain  (makeup);
+
+            if (smoothing)
+            {
+                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                    fxDryBuffer.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
+            }
+
             clipProc.process        (ctx);
+
+            if (smoothing)
+            {
+                for (int s = 0; s < n; ++s)
+                {
+                    const float wet = clipEnableSmoothed.getNextValue();
+                    const float dry = 1.0f - wet;
+                    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                        buffer.getWritePointer (ch)[s] = buffer.getReadPointer (ch)[s] * wet
+                                                       + fxDryBuffer.getReadPointer (ch)[s] * dry;
+                }
+            }
         }
         else
         {
             clipModeState.store (-1, std::memory_order_relaxed);
+        }
+    }
+
+    // Resonance suppressor — last in the FX chain, after clip.
+    {
+        suppressorEnableSmoothed.setTargetValue (
+            apvts.getRawParameterValue (ParamIDs::suppressorEnabled)->load() > 0.5f ? 1.0f : 0.0f);
+        const float suppressAmt = apvts.getRawParameterValue (ParamIDs::suppressorAmt)->load();
+        const bool smoothing = suppressorEnableSmoothed.isSmoothing();
+        const bool active    = smoothing || suppressorEnableSmoothed.getCurrentValue() > 0.5f;
+
+        if (active)
+        {
+            if (smoothing)
+            {
+                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                    fxDryBuffer.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
+            }
+
+            suppressorProc.process (buffer, suppressAmt);
+
+            if (smoothing)
+            {
+                for (int s = 0; s < buffer.getNumSamples(); ++s)
+                {
+                    const float wet = suppressorEnableSmoothed.getNextValue();
+                    const float dry = 1.0f - wet;
+                    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                        buffer.getWritePointer (ch)[s] = buffer.getReadPointer (ch)[s] * wet
+                                                       + fxDryBuffer.getReadPointer (ch)[s] * dry;
+                }
+            }
         }
     }
 
@@ -1416,17 +1713,22 @@ bool PluginProcessor::loadSampleFile (const juce::File& file)
     reader->read (&newSample->buffer, 0,
                   static_cast<int> (reader->lengthInSamples), 0, true, true);
 
-    // Calculate peak normalization gain (1 / peak amplitude).
+    // Calculate peak normalization gain with -3 dB headroom so downstream
+    // FX have room to add energy without clipping.
     {
+        constexpr float kHeadroomDb   = -3.0f;
+        const     float kHeadroomGain = juce::Decibels::decibelsToGain (kHeadroomDb);
+
         float peak = 0.0f;
         const int numCh      = newSample->buffer.getNumChannels();
         const int numSamples = newSample->buffer.getNumSamples();
         for (int ch = 0; ch < numCh; ++ch)
             peak = juce::jmax (peak, newSample->buffer.getMagnitude (ch, 0, numSamples));
-        newSample->peakNormalizeGain = peak > 0.0f ? 1.0f / peak : 1.0f;
+        newSample->peakNormalizeGain = peak > 0.0f ? (kHeadroomGain / peak) : 1.0f;
     }
 
     normalizeGain.store (newSample->peakNormalizeGain, std::memory_order_relaxed);
+    engine->forceAllVoicesOff();
     engine->setSampleData (std::move (newSample));
     lastLoadedFile = file;
     return true;

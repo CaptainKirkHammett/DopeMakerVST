@@ -57,7 +57,7 @@ bool PresetManager::savePreset (const juce::String& presetName, const juce::File
     if (sampleFile.existsAsFile())
     {
         const auto dest = getSamplesDirectory()
-                              .getChildFile (safe + "_" + sampleFile.getFileName());
+                              .getChildFile (sampleFile.getFileName());
         if (dest != sampleFile)
             sampleFile.copyFileTo (dest);
         relSamplePath = kSamplesFolder + "/" + dest.getFileName();
