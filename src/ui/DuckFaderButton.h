@@ -12,7 +12,8 @@ class DuckFaderButton : public juce::Component,
 {
 public:
     DuckFaderButton (juce::AudioProcessorValueTreeState& apvts,
-                     const juce::String& paramId);
+                     const juce::String& paramId,
+                     const juce::String& label = "Duck");
 
     void paint   (juce::Graphics&)                                          override;
     void mouseDown  (const juce::MouseEvent&)                               override;
@@ -32,6 +33,8 @@ private:
     float dragStartValue { 0.0f };
     int   dragStartY     { 0 };
     bool  isPressed      { false };
+
+    juce::String labelText;
 
     // Pixels of vertical drag that spans the full 0→1 range.
     static constexpr float kDragRange = 80.0f;

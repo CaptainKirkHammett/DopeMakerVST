@@ -25,6 +25,17 @@ void ArpeggiatorProcessor::reset()
     lfoLen.resetPhase();
 }
 
+void ArpeggiatorProcessor::resetTiming()
+{
+    currentIndex   = 0;
+    stepCounter    = 0;
+    noteOffCounter = 0;
+    noteOffAt      = 0;
+    tieToNext      = false;
+    dirty          = true;   // rebuild sequence on next process() call
+    lfoLen.resetPhase();
+}
+
 void ArpeggiatorProcessor::rebuildArpSequence (int octaves, ArpDirection dir)
 {
     arpSequence.clear();

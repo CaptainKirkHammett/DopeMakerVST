@@ -156,6 +156,9 @@ private:
     // Peak-normalize gain — smoothed to avoid clicks when toggling.
     juce::SmoothedValue<float> normalizeSmoothed { 1.0f };
 
+    // Step volume gate — smoothed to prevent clicks from step transitions.
+    juce::SmoothedValue<float> gateVolumeSmoothed { 1.0f };
+
     // FX enable crossfade smoothers — 5ms ramp to eliminate clicks on toggle.
     juce::SmoothedValue<float> filterEnableSmoothed  { 0.0f };
     juce::SmoothedValue<float> distEnableSmoothed    { 0.0f };
@@ -188,6 +191,7 @@ private:
     void setupLfoNoteOnCallback();
     void updateLfoAndPushOffset    (int numSamples);
     void updateVelLfoAndPushOffset (int numSamples);
+    void flushAllDspState();  // clears all DSP buffers/state on preset change
 
     // APVTS::Listener — enforces sampleStartPos < sampleEndPos.
     void parameterChanged (const juce::String& parameterID, float newValue) override;

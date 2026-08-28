@@ -67,7 +67,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         juce::StringArray { "Sample FW", "Sample BW", "FW/BW Rnd" }, 0));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::loopMode, "Loop Mode",
-        juce::StringArray { "No Loop", "Forward", "Ping-Pong" }, 0));
+        juce::StringArray { "No Loop", "Forward", "Ping-Pong" }, 2));
     params.push_back (std::make_unique<juce::AudioParameterInt> (
         ParamIDs::rootNote, "Root Note", 0, 119, 48));
     params.push_back (std::make_unique<juce::AudioParameterInt> (
@@ -418,6 +418,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
             ParamIDs::gateStepId (i), "Gate Step " + juce::String (i + 1),
             0.0f, 1.0f, 1.0f));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        ParamIDs::gateVolumeAmt, "Step Volume Gate Amount", 0.0f, 1.0f, 0.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::envFilterAmt,  "Step Filter Amount",  -1.0f, 1.0f, 0.0f));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::envDistAmt,    "Step Distortion Amount",    -1.0f, 1.0f, 0.0f));
@@ -722,6 +724,10 @@ void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
             ? normalizeGain.load (std::memory_order_relaxed)
             : 1.0f);
 
+    // Step volume gate — 5ms ramp to smooth step transitions.
+    gateVolumeSmoothed.reset (sampleRate, 0.005);
+    gateVolumeSmoothed.setCurrentAndTargetValue (1.0f);
+
     // FX enable crossfade smoothers — 5ms ramp for click-free toggling.
     constexpr double kEnableRampSec = 0.005;
     filterEnableSmoothed .reset (sampleRate, kEnableRampSec);
@@ -890,13 +896,19 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             if (playStarted || transportJumped)
             {
                 gateController.reset();
-                arpProc.reset();
 
-                // Only hard-kill voices on initial play start.  On transport
-                // loops/jumps the DAW re-sends MIDI — hard-killing here would
-                // cut audio to zero in one sample, causing an audible click.
                 if (playStarted)
+                {
+                    // Full reset on play start — no held notes carry over.
+                    arpProc.reset();
                     engine->forceAllVoicesOff();
+                }
+                else
+                {
+                    // Transport loop/jump — reset timing but keep held notes
+                    // so the arpeggiator continues with the sustained keys.
+                    arpProc.resetTiming();
+                }
             }
 
             lastPpqPosition = (ppqPosition >= 0.0) ? ppqPosition + blockDurationPpq : -1.0;
@@ -1116,8 +1128,30 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // FX chain: Stutter → Filter → Distortion → Phaser → Ping-Pong Delay.
+    // FX chain: Volume Gate → Stutter → Filter → Distortion → Phaser → Ping-Pong Delay.
     // Each FX skipped entirely if disabled — no CPU waste.
+
+    // Step volume gate — per-sample smoothed to prevent clicks at step transitions.
+    {
+        const bool gateOn = apvts.getRawParameterValue (ParamIDs::gateEnabled)->load() > 0.5f;
+        const float gateAmt = gateOn
+            ? apvts.getRawParameterValue (ParamIDs::gateVolumeAmt)->load()
+            : 0.0f;
+
+        // Target gain: blend between 1.0 (dry) and envLevel (fully gated).
+        const float targetGain = 1.0f - gateAmt * (1.0f - envLevel);
+        gateVolumeSmoothed.setTargetValue (targetGain);
+
+        if (gateVolumeSmoothed.isSmoothing() || targetGain < 1.0f)
+        {
+            for (int s = 0; s < buffer.getNumSamples(); ++s)
+            {
+                const float g = gateVolumeSmoothed.getNextValue();
+                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                    buffer.getWritePointer (ch)[s] *= g;
+            }
+        }
+    }
 
     // Stutter Len LFO — modulates the Len parameter each block.
     {
@@ -1173,8 +1207,8 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             // Gate step, audio envelope, and LFO all modulate cutoff in octaves.
             const float afEnvAmt = apvts.getRawParameterValue (ParamIDs::afEnvFilterAmt)->load();
             const float cutoff = juce::jlimit (20.0f, 20000.0f,
-                baseCutoff * std::pow (2.0f, envLevel * envAmt * 4.0f
-                                           + audioEnvLevel * afEnvAmt * 4.0f
+                baseCutoff * std::pow (2.0f, envLevel * envAmt * 6.0f
+                                           + audioEnvLevel * afEnvAmt * 6.0f
                                            + lfoSample * 4.0f));
             filterProc.setParameters (static_cast<FilterMode> (modeIdx), cutoff, res);
 
@@ -1212,7 +1246,7 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             const float baseDrive = apvts.getRawParameterValue (ParamIDs::distDrive)->load();
             const float envAmt   = apvts.getRawParameterValue (ParamIDs::envDistAmt)->load();
             const float afEnvAmt = apvts.getRawParameterValue (ParamIDs::afEnvDistAmt)->load();
-            const float drive    = juce::jlimit (0.0f, 1.0f, baseDrive + envLevel * envAmt + audioEnvLevel * afEnvAmt);
+            const float drive    = juce::jlimit (0.0f, 1.0f, baseDrive + envLevel * envAmt * 1.5f + audioEnvLevel * afEnvAmt * 1.5f);
             const float output   = apvts.getRawParameterValue (ParamIDs::distOutput)->load();
             const int   bits    = static_cast<int> (apvts.getRawParameterValue (ParamIDs::distBitDepth)->load()) + 2;
             distProc.setMode       (static_cast<DistMode> (modeIdx));
@@ -1256,10 +1290,10 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         {
             const float baseMix      = apvts.getRawParameterValue (ParamIDs::flangerMix)->load();
             const float envAmt       = apvts.getRawParameterValue (ParamIDs::envFlangerAmt)->load();
-            const float mix          = juce::jlimit (0.0f, 1.0f, baseMix + envLevel * envAmt);
+            const float mix          = juce::jlimit (0.0f, 1.0f, baseMix + envLevel * envAmt * 1.5f);
             const float baseFeedback = apvts.getRawParameterValue (ParamIDs::flangerFeedback)->load();
             const float afEnvAmt     = apvts.getRawParameterValue (ParamIDs::afEnvFlangerAmt)->load();
-            const float feedback     = juce::jlimit (0.0f, 1.0f, baseFeedback + audioEnvLevel * afEnvAmt);
+            const float feedback     = juce::jlimit (0.0f, 1.0f, baseFeedback + audioEnvLevel * afEnvAmt * 1.5f);
             flangerProc.setParameters (
                 apvts.getRawParameterValue (ParamIDs::flangerRate)->load(),
                 feedback,
@@ -1301,13 +1335,13 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             const float depth   = apvts.getRawParameterValue (ParamIDs::phaserDepth)->load();
             const float baseFb   = apvts.getRawParameterValue (ParamIDs::phaserFeedback)->load();
             const float afEnvAmt = apvts.getRawParameterValue (ParamIDs::afEnvPhaserAmt)->load();
-            const float fb       = juce::jlimit (-1.0f, 1.0f, baseFb + audioEnvLevel * afEnvAmt);
+            const float fb       = juce::jlimit (-1.0f, 1.0f, baseFb + audioEnvLevel * afEnvAmt * 1.5f);
             const int   stIdx   = static_cast<int> (apvts.getRawParameterValue (ParamIDs::phaserStages)->load());
             const int   stages  = (stIdx + 1) * 2;
             const float centre  = apvts.getRawParameterValue (ParamIDs::phaserCentreFreq)->load();
             const float baseMix = apvts.getRawParameterValue (ParamIDs::phaserMix)->load();
             const float phaserEnvAmt = apvts.getRawParameterValue (ParamIDs::envPhaserAmt)->load();
-            const float mix     = juce::jlimit (0.0f, 1.0f, baseMix + envLevel * phaserEnvAmt);
+            const float mix     = juce::jlimit (0.0f, 1.0f, baseMix + envLevel * phaserEnvAmt * 1.5f);
             phaserProc.setParameters (rate, depth, fb, stages, centre, mix);
 
             if (smoothing)
@@ -1420,7 +1454,7 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             {
                 const float baseMix = apvts.getRawParameterValue (ParamIDs::delayMix)->load();
                 const float delayEnvAmt = apvts.getRawParameterValue (ParamIDs::envDelayAmt)->load();
-                delayProc.setMix (juce::jlimit (0.0f, 1.0f, baseMix + envLevel * delayEnvAmt));
+                delayProc.setMix (juce::jlimit (0.0f, 1.0f, baseMix + envLevel * delayEnvAmt * 1.5f));
             }
 
             const int   fbModeIdx = static_cast<int> (apvts.getRawParameterValue (ParamIDs::delayFbFilterMode)->load());
@@ -1751,6 +1785,44 @@ void PluginProcessor::getStateInformation (juce::MemoryBlock& destData)
     copyXmlToBinary (*xml, destData);
 }
 
+void PluginProcessor::flushAllDspState()
+{
+    // Kill all active voices so no old sample audio lingers.
+    engine->forceAllVoicesOff();
+
+    // Reset every DSP processor to clear internal buffers and state.
+    filterProc.reset();
+    distProc.reset();
+    flangerProc.reset();
+    phaserProc.reset();
+    reverbProc.reset();
+    delayProc.reset();
+    highcutProc.reset();
+    lowcutProc.reset();
+    clipProc.reset();
+    stereoProc.reset();
+    limiterProc.reset();
+    suppressorProc.reset();
+    sidechainProc.reset();
+    gateController.reset();
+    arpProc.reset();
+
+    // Re-prepare stutter so its capture buffer is zeroed out.
+    stutterProc.prepare (getSampleRate(), getBlockSize());
+
+    // Re-prepare granulizer so its delay buffer is cleared.
+    granulizerProc.prepare (getSampleRate(), getBlockSize());
+
+    // Reset LFOs.
+    lfo.resetPhase();
+    velLfo.resetPhase();
+    filterLfo.resetPhase();
+    stutterLenLfo.resetPhase();
+
+    // Snap smoothed values to their current targets so old ramps don't bleed through.
+    gateVolumeSmoothed.setCurrentAndTargetValue (1.0f);
+}
+
 void PluginProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     std::unique_ptr<juce::XmlElement> xml (getXmlFromBinary (data, sizeInBytes));
@@ -1774,6 +1846,9 @@ void PluginProcessor::setStateInformation (const void* data, int sizeInBytes)
     }
 
     apvts.replaceState (state);
+
+    // Flush all DSP state so no audio from the previous preset spills over.
+    flushAllDspState();
 
     if (samplePath.isNotEmpty())
     {

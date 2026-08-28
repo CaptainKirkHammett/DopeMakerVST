@@ -6,6 +6,11 @@ void FilterProcessor::prepare (const juce::dsp::ProcessSpec& spec)
     filter.prepare (spec);
     needsUpdate = true;
 
+    // 3ms ramp — fast enough to track modulation, slow enough to prevent clicks.
+    smoothedCutoff.reset (spec.sampleRate, 0.003);
+    smoothedCutoff.setCurrentAndTargetValue (currentCutoff);
+    smoothingActive = false;
+
     combDelayBuf.setSize (static_cast<int> (spec.numChannels), kCombBufSize);
     combDelayBuf.clear();
     combWritePos = 0;
@@ -20,16 +25,21 @@ void FilterProcessor::reset()
 
 void FilterProcessor::setParameters (FilterMode mode, float cutoffHz, float resonance)
 {
-    const bool changed = (mode != currentMode)
-                      || (std::abs (cutoffHz  - currentCutoff) > 0.5f)
-                      || (std::abs (resonance - currentQ)      > 0.001f);
-    if (!changed)
-        return;
+    const bool modeChanged = (mode != currentMode);
+    const bool qChanged    = (std::abs (resonance - currentQ) > 0.001f);
 
-    currentMode   = mode;
-    currentCutoff = cutoffHz;
-    currentQ      = resonance;
-    needsUpdate   = true;
+    currentMode = mode;
+    currentQ    = resonance;
+
+    // Always update the smoother target; it will ramp to the new cutoff.
+    smoothedCutoff.setTargetValue (cutoffHz);
+    smoothingActive = smoothedCutoff.isSmoothing();
+
+    if (modeChanged || qChanged)
+    {
+        currentCutoff = cutoffHz;
+        needsUpdate   = true;
+    }
 }
 
 void FilterProcessor::updateCoefficients()
@@ -82,12 +92,57 @@ void FilterProcessor::updateCoefficients()
 
 void FilterProcessor::process (juce::dsp::ProcessContextReplacing<float>& context)
 {
-    updateCoefficients();
-
     if (currentMode == FilterMode::CombPlus || currentMode == FilterMode::CombMinus)
+    {
+        // Comb modes: smoothing applied inside processComb via delay length.
+        currentCutoff = smoothedCutoff.skip (static_cast<int> (context.getOutputBlock().getNumSamples()));
+        needsUpdate = true;
+        updateCoefficients();
         processComb (context);
-    else
-        filter.process (context);
+        return;
+    }
+
+    // IIR modes: if the cutoff is smoothing, process in small sub-blocks
+    // with coefficient updates between them to ramp smoothly.
+    if (smoothingActive)
+    {
+        auto& block = context.getOutputBlock();
+        const int totalSamples = static_cast<int> (block.getNumSamples());
+
+        // Sub-block size: small enough for smooth cutoff ramp, large enough
+        // to keep CPU reasonable.
+        constexpr int kChunkSize = 8;
+        int pos = 0;
+
+        while (pos < totalSamples)
+        {
+            const int chunkLen = juce::jmin (kChunkSize, totalSamples - pos);
+            const float fc = smoothedCutoff.skip (chunkLen);
+
+            if (std::abs (fc - currentCutoff) > 0.5f)
+            {
+                currentCutoff = fc;
+                needsUpdate   = true;
+                updateCoefficients();
+            }
+
+            auto subBlock = block.getSubBlock (static_cast<size_t> (pos),
+                                               static_cast<size_t> (chunkLen));
+            juce::dsp::ProcessContextReplacing<float> subCtx (subBlock);
+            filter.process (subCtx);
+
+            pos += chunkLen;
+        }
+
+        smoothingActive = smoothedCutoff.isSmoothing();
+        return;
+    }
+
+    // Not smoothing — batch process as before.
+    currentCutoff = smoothedCutoff.getCurrentValue();
+    needsUpdate = true;
+    updateCoefficients();
+    filter.process (context);
 }
 
 void FilterProcessor::processComb (juce::dsp::ProcessContextReplacing<float>& context)

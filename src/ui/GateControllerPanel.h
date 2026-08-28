@@ -4,6 +4,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <array>
 #include "../dsp/GateController.h"
+#include "DuckFaderButton.h"
 
 class ParameterDisplay; // forward declaration — avoids circular include
 
@@ -45,7 +46,7 @@ private:
     juce::Slider stepCountSlider;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> stepCountAttach;
 
-    juce::Label    divLabel { {}, "Div" };
+    std::unique_ptr<DuckFaderButton> gateFader;
     juce::ComboBox divBox;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> divAttach;
 

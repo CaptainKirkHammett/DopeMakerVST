@@ -2,7 +2,9 @@
 #include "SuomiLookAndFeel.h"
 
 DuckFaderButton::DuckFaderButton (juce::AudioProcessorValueTreeState& apvts,
-                                   const juce::String& paramId)
+                                   const juce::String& paramId,
+                                   const juce::String& label)
+    : labelText (label)
 {
     hiddenSlider.setRange (0.0, 1.0);
     hiddenSlider.addListener (this);
@@ -76,7 +78,7 @@ void DuckFaderButton::paint (juce::Graphics& g)
         g.setFont (laf->getLabelFontRegular (17.60f));
     else
         g.setFont (17.60f);
-    g.drawText ("Duck", getLocalBounds(), juce::Justification::centred, false);
+    g.drawText (labelText, getLocalBounds(), juce::Justification::centred, false);
 }
 
 void DuckFaderButton::mouseDown (const juce::MouseEvent& e)

@@ -35,7 +35,7 @@ public:
     std::atomic<int> currentEffectiveDivIndex { 2 };  // default: 1/16
 
 private:
-    static constexpr int kCrossfadeSamples = 256;  // ~5.8 ms at 44.1k — smooth transitions
+    static constexpr int kCrossfadeSamples = 512;  // ~11.6 ms at 44.1k — smooth transitions
     static constexpr int kMaxBufferSecs    = 2;
 
     double sampleRate_ = 44100.0;
@@ -85,16 +85,18 @@ private:
     int    activeDivIdx_ = -1;  // committed division — only changes at boundaries
 
     // Fast-division constraint: indices 3 (1/32) and 4 (1/64) can only play
-    // for one step each.  After two consecutive fast steps, a slow division
+    // for one step each.  After one consecutive fast burst, a slow division
     // (1/4, 1/8, or 1/16) is forced.
     int  consecutiveFast_ = 0;   // how many consecutive fast steps so far
     int  prevDivIdx_      = -1;  // division used on the previous step
 
-    // Minimum gate for fast divisions: when stutter activates at 1/32 or 1/64,
-    // it stays on for at least enough steps to fill 1/8 note.
-    static constexpr int kMinSteps32 = 4;   // 4 × 1/32 = 1/8
-    static constexpr int kMinSteps64 = 8;   // 8 × 1/64 = 1/8
-    int  minStepsRemaining_ = 0;
+    // Minimum hold: every division (slow or fast) is locked for at least 1/8 note
+    // in samples.  This prevents the LFO from cycling through divisions faster
+    // than 1/8-note intervals, keeping the stutter musically coherent.
+    int  holdSamplesRemaining_ = 0;
+
+    // Computes the hold duration in samples for a 1/8 note at the given tempo.
+    int  holdSamplesFor8th (double bpm) const;
 
     juce::Random rng_;
 

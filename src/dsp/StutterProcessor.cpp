@@ -28,10 +28,10 @@ void StutterProcessor::prepare (double sampleRate, int /*maxBlockSize*/)
     loopFadeOldR_      = 0.0f;
     lastPpq_           = -1.0;
     lastDivIdx_       = -1;
-    consecutiveFast_   = 0;
-    prevDivIdx_        = -1;
-    activeDivIdx_      = -1;
-    minStepsRemaining_ = 0;
+    consecutiveFast_      = 0;
+    prevDivIdx_           = -1;
+    activeDivIdx_         = -1;
+    holdSamplesRemaining_ = 0;
 
     // Smooth play-length changes over ~3 ms to avoid clicks from LFO modulation.
     smoothedPlayLen_.reset (sampleRate, 0.003);
@@ -43,6 +43,13 @@ void StutterProcessor::prepare (double sampleRate, int /*maxBlockSize*/)
 double StutterProcessor::divisionToBeats (int divIdx) const
 {
     return kDivBeats[juce::jlimit (0, kNumDivisions - 1, divIdx)];
+}
+
+int StutterProcessor::holdSamplesFor8th (double bpm) const
+{
+    const double beatsPerSec = bpm / 60.0;
+    // 1/8 note = 0.5 beats
+    return juce::jmax (1, static_cast<int> ((0.5 / beatsPerSec) * sampleRate_));
 }
 
 int StutterProcessor::effectiveDivIndex (float lfoLow, float lfoHigh) const
@@ -80,9 +87,9 @@ int StutterProcessor::constrainFastDiv (int candidate, float lfoLow, float lfoHi
     }
 
     // Fast division requested.
-    if (consecutiveFast_ >= 2)
+    if (consecutiveFast_ >= 1)
     {
-        // Already had two consecutive fast steps — force a slow division.
+        // Already had one fast burst (1/8 note) — force a slow division.
         // Pick randomly from slow divisions (0=1/4, 1=1/8, 2=1/16) within the
         // selected [lfoLow, lfoHigh] range.
         const int lo = juce::jlimit (0, 2, static_cast<int> (lfoLow));
@@ -94,29 +101,7 @@ int StutterProcessor::constrainFastDiv (int candidate, float lfoLow, float lfoHi
         return slowIdx;
     }
 
-    if (consecutiveFast_ == 1 && candidate == prevDivIdx_)
-    {
-        // Same fast division twice in a row — not allowed.
-        // Try the other fast division if it's in range.
-        const int otherFast = (candidate == 3) ? 4 : 3;
-        const int maxIdx = juce::jlimit (0, kNumDivisions - 1, static_cast<int> (juce::jmax (lfoLow, lfoHigh)));
-        if (otherFast <= maxIdx)
-        {
-            consecutiveFast_ = 2;
-            prevDivIdx_ = otherFast;
-            return otherFast;
-        }
-        // Other fast division not in range — fall back to slow.
-        const int lo = juce::jlimit (0, 2, static_cast<int> (lfoLow));
-        const int hi = juce::jlimit (0, 2, static_cast<int> (lfoHigh));
-        const int slowIdx = lo + rng_.nextInt (juce::jmax (1, hi - lo + 1));
-
-        consecutiveFast_ = 0;
-        prevDivIdx_ = slowIdx;
-        return slowIdx;
-    }
-
-    // First fast step, or second fast step with a different division — allow it.
+    // First fast step — allow it.
     consecutiveFast_++;
     prevDivIdx_ = candidate;
     return candidate;
@@ -158,7 +143,7 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
         lastPpq_           = -1.0;
         lastDivIdx_        = -1;
         activeDivIdx_      = -1;
-        minStepsRemaining_ = 0;
+        holdSamplesRemaining_ = 0;
 
         // Keep filling capture buffer so enabling is glitch-free.
         // Process fade-out if one is active (stutter was playing when disabled).
@@ -257,24 +242,22 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
 
     for (int s = 0; s < numSamples; ++s)
     {
+        // Count down the hold timer every sample.
+        if (holdSamplesRemaining_ > 0)
+            --holdSamplesRemaining_;
+
         // Check for boundary at this sample.
         if (boundaryThisBlock && s == boundarySampleOffset)
         {
             boundaryThisBlock = false;  // consume the event
 
-            // During minimum gate, lock the division so fast repeats stay consistent.
-            if (minStepsRemaining_ <= 0)
+            // Only allow a division change when the hold has expired.
+            // This guarantees every division plays for at least 1/8 note.
+            if (holdSamplesRemaining_ <= 0)
             {
-                const int prevDiv = activeDivIdx_;
                 activeDivIdx_ = constrainFastDiv (rawIdx, lfoLow, lfoHigh);
                 currentEffectiveDivIndex.store (activeDivIdx_, std::memory_order_relaxed);
-
-                // If we just transitioned to a fast division (even mid-stutter),
-                // start a minimum gate so it plays for a full 1/8 burst.
-                if (activeDivIdx_ >= 3 && prevDiv < 3 && stutterActive_)
-                {
-                    minStepsRemaining_ = (activeDivIdx_ == 4) ? kMinSteps64 : kMinSteps32;
-                }
+                holdSamplesRemaining_ = holdSamplesFor8th (safeBpm);
             }
 
             // Compute interval for the committed division.
@@ -296,40 +279,35 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
                     smoothedPlayLen_.setCurrentAndTargetValue (static_cast<float> (stutterPlayLen_));
                     lenWrapFading_      = false;
                     loopFadeRemaining_  = 0;
+                    fadeOutRemaining_   = 0;  // cancel any in-progress fade-out
                     fadeInTotal_        = juce::jmin (kCrossfadeSamples, stutterPlayLen_ / 2);
                     fadeInRemaining_    = fadeInTotal_;
-
-                    // Fast divisions get a minimum gate so they produce
-                    // a usable burst of rapid repeats instead of a single blip.
-                    // Both 1/32 and 1/64 play for a full 1/8 note.
-                    if (activeDivIdx_ == 4)
-                        minStepsRemaining_ = kMinSteps64;
-                    else if (activeDivIdx_ == 3)
-                        minStepsRemaining_ = kMinSteps32;
-                    else
-                        minStepsRemaining_ = 0;
                 }
             }
             else
             {
-                // Decrement minimum-gate counter for fast divisions.
-                if (minStepsRemaining_ > 0)
-                    --minStepsRemaining_;
-
-                if (minStepsRemaining_ > 0)
+                if (rng_.nextFloat() >= amount)
                 {
-                    // Still inside minimum gate — keep looping the frozen segment.
-                }
-                else if (rng_.nextFloat() >= amount)
-                {
-                    // Minimum gate expired — probability chance to turn OFF.
-                    // amount=1 → never turns off (100% stutter); amount=0 → always
-                    // turns off.  Using (1-amount) keeps the knob intuitive: higher
-                    // probability = more stutter.
+                    // Probability chance to turn OFF.
                     fadeOutRemaining_ = kCrossfadeSamples;
                     stutterActive_ = false;
                 }
-                // else: stay on — keep looping the same frozen segment (no recapture)
+                else
+                {
+                    // Stay on — update segment length to match the (possibly changed)
+                    // division and reset read position to the beat boundary so the
+                    // stutter loop stays locked to the DAW transport grid.
+                    stutterSegLen_  = juce::jmin (newInterval, captureLength_);
+                    stutterPlayLen_ = juce::jmax (1, static_cast<int> (lengthParam_ * stutterSegLen_));
+                    smoothedPlayLen_.setTargetValue (static_cast<float> (stutterPlayLen_));
+
+                    // Crossfade from old tail into new loop head — use the NEW play
+                    // length for the crossfade window so it fits the new segment.
+                    loopFadeOldL_      = lastWetL_;
+                    loopFadeOldR_      = lastWetR_;
+                    loopFadeRemaining_ = juce::jmax (1, juce::jmin (kCrossfadeSamples, stutterPlayLen_ / 2));
+                    stutterReadPos_ = 0;
+                }
             }
         }
 

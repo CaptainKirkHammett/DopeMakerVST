@@ -16,6 +16,7 @@ public:
 
     void prepare (double sampleRate);
     void reset   ();
+    void resetTiming ();  // resets step/sequence position without clearing held notes
 
     void process (juce::MidiBuffer& midi, int numSamples,
                   double bpm, SyncDivision div, int octaves,

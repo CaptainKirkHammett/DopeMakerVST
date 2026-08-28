@@ -24,8 +24,11 @@ GateControllerPanel::GateControllerPanel (juce::AudioProcessorValueTreeState& ap
     stepCountAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         apvts, ParamIDs::gateStepCount, stepCountSlider);
 
+    // ── Gate volume fader ──────────────────────────────────────────────────────
+    gateFader = std::make_unique<DuckFaderButton> (apvts, ParamIDs::gateVolumeAmt, "Gate");
+    addAndMakeVisible (*gateFader);
+
     // ── Division combo ────────────────────────────────────────────────────────
-    addAndMakeVisible (divLabel);
     const juce::StringArray divNames {
         "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1"
     };
@@ -69,7 +72,7 @@ GateControllerPanel::GateControllerPanel (juce::AudioProcessorValueTreeState& ap
         const float a = enableButton.getToggleState() ? 1.0f : 0.35f;
         stepCountLabel .setAlpha (a);
         stepCountSlider.setAlpha (a);
-        divLabel       .setAlpha (a);
+        gateFader      ->setAlpha (a);
         divBox         .setAlpha (a);
         maxButton      .setAlpha (a);
         minButton      .setAlpha (a);
@@ -223,11 +226,12 @@ void GateControllerPanel::resized()
     }
     left.removeFromTop (gap);
 
-    // Div row: label + combo.
+    // Gate + Div row: gate fader button + division combo, same half-width as buttons below.
     {
         auto row = left.removeFromTop (rowH);
-        divLabel.setBounds (row.removeFromLeft (26).withHeight (lblH));
-        divBox.setBounds   (row);
+        const int btnW = row.getWidth() / 2;
+        gateFader->setBounds (row.removeFromLeft (btnW));
+        divBox.setBounds     (row);
     }
     left.removeFromTop (gap);
 

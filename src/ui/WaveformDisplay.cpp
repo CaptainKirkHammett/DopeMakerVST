@@ -29,13 +29,13 @@ void WaveformDisplay::BadgeOverlay::paint (juce::Graphics& g)
             const juce::String presetPart = owner.presetName + " ";
             const int presetW = fontRegular.getStringWidth (presetPart);
 
-            g.setColour (juce::Colours::white.withAlpha (0.65f));
-            g.setFont (fontRegular);
+            g.setColour (juce::Colours::white.withAlpha (0.95f));
+            g.setFont (fontBold);
             g.drawText (presetPart, inner.getX(), inner.getY(), presetW, inner.getHeight(),
                         juce::Justification::centredLeft, false);
 
-            g.setColour (juce::Colours::white.withAlpha (0.95f));
-            g.setFont (fontBold);
+            g.setColour (juce::Colours::white.withAlpha (0.55f));
+            g.setFont (fontRegular);
             g.drawText (sampleName, inner.getX() + presetW, inner.getY(),
                         inner.getWidth() - presetW, inner.getHeight(),
                         juce::Justification::centredLeft, true);
@@ -82,8 +82,8 @@ juce::Rectangle<int> WaveformDisplay::BadgeOverlay::getBadgeBounds() const
     if (owner.presetName.isNotEmpty())
     {
         const juce::String presetPart = owner.presetName + " ";
-        textW = fontRegular.getStringWidth (presetPart)
-              + fontBold.getStringWidth (owner.getDisplaySampleName());
+        textW = fontBold.getStringWidth (presetPart)
+              + fontRegular.getStringWidth (owner.getDisplaySampleName());
     }
     else
     {

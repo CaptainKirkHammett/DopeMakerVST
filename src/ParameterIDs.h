@@ -123,6 +123,7 @@ namespace ParamIDs
         std::snprintf (buf, sizeof (buf), "gateStep%02d", zeroBasedIndex + 1);
         return std::string (buf);
     }
+    inline constexpr const char* gateVolumeAmt  = "gateVolumeAmt";
     inline constexpr const char* envFilterAmt       = "envFilterAmt";
     inline constexpr const char* envDistAmt         = "envDistAmt";
     inline constexpr const char* envFlangerAmt      = "envFlangerAmt";

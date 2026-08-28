@@ -33,6 +33,10 @@ private:
     float       currentQ       { 0.707f };
     bool        needsUpdate    { true };
 
+    // Per-sample cutoff smoothing to prevent clicks from fast step modulation.
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> smoothedCutoff { 20000.0f };
+    bool        smoothingActive { false };
+
     // Comb filter delay line — allocated in prepare(), one buffer per channel.
     // Power-of-2 size covers down to ~3 Hz at 192 kHz.
     static constexpr int kCombBufSize = 16384;
