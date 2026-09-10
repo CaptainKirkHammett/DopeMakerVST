@@ -10,6 +10,7 @@ namespace ParamIDs
 {
     // --- Sample Engine ---
     inline constexpr const char* zcPerChannel    = "zcPerChannel";    // Zero-crossing: per-channel (true) or shared (false)
+    inline constexpr const char* hqInterpolation = "hqInterpolation"; // Better Quality: windowed-sinc instead of Hermite cubic
     inline constexpr const char* gainDb          = "gainDb";          // Pre-FX output gain (dB)
     inline constexpr const char* limiterAmount   = "limiterAmount";   // Pre-FX limiter (0=off, 1=max)
     inline constexpr const char* stereoWidth     = "stereoWidth";     // Stereo width (-1=mono, 0=off, 1=wide)
@@ -43,6 +44,7 @@ namespace ParamIDs
     inline constexpr const char* slicerEnabled   = "slicerEnabled";
     inline constexpr const char* slicerLoNote    = "slicerLoNote";   // AudioParameterChoice, index = MIDI note (Slice Start key)
     inline constexpr const char* sliceCount      = "sliceCount";      // AudioParameterChoice, index+1 = number of slices (1–128)
+    inline constexpr const char* slicerRandomEnabled = "slicerRandomEnabled"; // Slice1: random slice on trigger note
     inline constexpr const char* lfoWaveform     = "lfoWaveform";
     inline constexpr const char* lfoRate         = "lfoRate";
     inline constexpr const char* lfoDepth        = "lfoDepth";
@@ -183,6 +185,7 @@ namespace ParamIDs
     inline constexpr const char* reverbDamping  = "reverbDamping";
     inline constexpr const char* reverbWidth    = "reverbWidth";
     inline constexpr const char* reverbMix      = "reverbMix";
+    inline constexpr const char* reverbDuck     = "reverbDuck";
     inline constexpr const char* reverbReverse  = "reverbReverse";
     inline constexpr const char* reverbRevLen   = "reverbRevLen";
     inline constexpr const char* reverbRevSync  = "reverbRevSync";
@@ -238,6 +241,7 @@ namespace ParamIDs
     // --- Resonance Suppressor (AutoEQ) ---
     inline constexpr const char* suppressorEnabled = "suppressorEnabled";
     inline constexpr const char* suppressorAmt     = "suppressorAmt";  // 0–1
+    inline constexpr const char* suppressorFFT     = "suppressorFFT";  // true = FFT mode, false = IIR
 
     // --- Granulizer ---
     inline constexpr const char* granEnabled     = "granEnabled";

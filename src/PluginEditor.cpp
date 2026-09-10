@@ -70,6 +70,17 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     contactLabel.addMouseListener (this, false);
     uiRoot.addAndMakeVisible (contactLabel);
 
+    bqButton.getProperties().set ("fxButton", true);
+    bqButton.setTooltip ("Better Quality Interpolation\n\n"
+                         "OFF  Good Quality (Hermite cubic): smooth 4-point interpolation that works well "
+                         "for most pitch shifts. Very low CPU cost.\n\n"
+                         "ON   Better Quality (windowed sinc): 8-point sinc interpolation with Blackman-Harris "
+                         "window. Virtually eliminates aliasing artifacts at extreme pitch shifts (octave+). "
+                         "Higher CPU cost per voice - use when sound quality matters more than polyphony headroom.");
+    bqAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        p.apvts, ParamIDs::hqInterpolation, bqButton);
+    uiRoot.addAndMakeVisible (bqButton);
+
     zcButton.getProperties().set ("fxButton", true);
     zcButton.setTooltip ("ZC Mode\n\n"
                          "OFF  Shared zero-crossing: both channels snap to the same (earliest) zero-crossing "
@@ -125,6 +136,11 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     // Wire up the panel so loading a preset also refreshes the waveform.
     presetManagerPanel.onPresetLoaded = [this] (const juce::File& sampleFile)
     {
+        // Request a DSP flush so no audio from the previous preset spills over
+        // (delay tails, reverb tails, stutter capture buffer, etc.).
+        // The actual flush runs on the audio thread at the top of processBlock().
+        processor.requestDspFlush();
+
         if (sampleFile.existsAsFile())
         {
             processor.loadSampleFile (sampleFile);
@@ -170,6 +186,9 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     magixxPanel.setVelocitySource (&p.getEngine()->lastPlayedVelocity,
                                    &p.getEngine()->noteOnGeneration);
     uiRoot.addAndMakeVisible (granulizerPanel);
+    granulizerPanel.setModSources (&p.granulizerProc.lfoOutput,
+                                   p.apvts.getRawParameterValue (ParamIDs::granDepth),
+                                   p.apvts.getRawParameterValue (ParamIDs::granWaveSpacing));
     uiRoot.addAndMakeVisible (stutterPanel);
     stutterPanel.setEffectiveDivSource (&p.stutterProc.currentEffectiveDivIndex);
     stutterPanel.setLenLfoModSource (&p.stutterLenLfoOutput,
@@ -204,6 +223,9 @@ PluginEditor::PluginEditor (PluginProcessor& p)
                                  &p.flangerProc.lfoFullDepth,
                                  p.apvts.getRawParameterValue (ParamIDs::flangerDelayStart));
     uiRoot.addAndMakeVisible (reverbPanel);
+    reverbPanel.setDuckModSources (p.apvts.getRawParameterValue (ParamIDs::reverbMix),
+                                   &p.reverbProc.duckLfoOutput,
+                                   &p.reverbProc.duckLfoDepth);
     uiRoot.addAndMakeVisible (phaserPanel);
     phaserPanel.setModSources  (&p.gateController.currentStepLevelForUI,
                                  p.apvts.getRawParameterValue (ParamIDs::envPhaserAmt),
@@ -297,20 +319,46 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     coverArtClickArea.setAlpha (0.0f);
     coverArtClickArea.setMouseCursor (juce::MouseCursor::PointingHandCursor);
     coverArtClickArea.onClick = [] {
-        juce::URL ("https://msha.ke/dopescience").launchInDefaultBrowser();
+        juce::URL ("https://dopescience.bandcamp.com/").launchInDefaultBrowser();
     };
     uiRoot.addAndMakeVisible (coverArtClickArea);
 
     uiRoot.addChildComponent (signalPathOverlay);
+
+    // One-shot timer: catches DAWs that call setStateInformation after
+    // createEditor, so the preset name and sample show up even then.
+    startTimer (200);
 }
 
 PluginEditor::~PluginEditor()
 {
+    stopTimer();
+
     for (auto* param : processor.getParameters())
         if (auto* rap = dynamic_cast<juce::RangedAudioParameter*> (param))
             processor.apvts.removeParameterListener (rap->getParameterID(), this);
 
     setLookAndFeel (nullptr);
+}
+
+void PluginEditor::timerCallback()
+{
+    stopTimer();  // one-shot
+
+    // Re-read preset name and sample from the processor in case
+    // setStateInformation was called after createEditor.
+    if (const auto& f = processor.getLastLoadedFile(); f.existsAsFile())
+    {
+        waveformDisplay.setFile (f);
+
+        const auto& name = processor.presetManager.getCurrentPresetName();
+        if (name.isNotEmpty())
+            waveformDisplay.setPresetName (name);
+    }
+    else if (processor.sampleMissing)
+    {
+        waveformDisplay.setMissingSample (processor.missingSampleName);
+    }
 }
 
 void PluginEditor::mouseUp (const juce::MouseEvent& e)
@@ -324,9 +372,7 @@ void PluginEditor::mouseUp (const juce::MouseEvent& e)
     }
     else if (e.eventComponent == &titleLabel)
     {
-        signalPathOverlay.setBounds (uiRoot.getLocalBounds());
-        signalPathOverlay.setVisible (true);
-        signalPathOverlay.toFront (true);
+        juce::URL ("https://dope.town/").launchInDefaultBrowser();
     }
 }
 
@@ -377,6 +423,10 @@ void PluginEditor::resized()
         zcButton        .setBounds (zcCol.removeFromTop (btnH).reduced (3, 2));
         openFolderButton.setBounds (zcCol.removeFromTop (btnH).reduced (3, 2));
         defaultButton   .setBounds (zcCol.removeFromTop (btnH).reduced (3, 2));
+
+        // BQ toggle sits to the left of the ZC column, same row 1 height.
+        auto bqCol = header.removeFromRight (46);
+        bqButton.setBounds (bqCol.removeFromTop (btnH).reduced (3, 2));
     }
     logoButton.setBounds  (header.reduced (4));
     // "Contact" at the same vertical position and font size as betaLabel, right-aligned next to logo.

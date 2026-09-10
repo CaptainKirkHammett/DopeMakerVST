@@ -291,9 +291,9 @@ void DelayPanel::resized()
     {
         // Sync and Duck share the same 115 px slot the Sync button previously occupied.
         auto syncDuckArea = row1.removeFromLeft (115);
-        syncButton.setBounds (syncDuckArea.removeFromLeft (55).withSizeKeepingCentre (55, 24));
+        duckFader->setBounds (syncDuckArea.removeFromLeft (55).withSizeKeepingCentre (55, 24));
         syncDuckArea.removeFromLeft (5);
-        duckFader->setBounds (syncDuckArea.withSizeKeepingCentre (55, 24));
+        syncButton.setBounds (syncDuckArea.withSizeKeepingCentre (55, 24));
     }
     row1.removeFromLeft (8);
     addKnob (timeLLabel, timeLSlider, row1, 44);

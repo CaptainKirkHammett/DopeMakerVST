@@ -21,11 +21,10 @@ public:
         titleLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff));
         addAndMakeVisible (titleLabel);
 
-        // Preset name on its own line — truncated with ellipsis for long names.
         nameLabel.setText (presetName, juce::dontSendNotification);
         nameLabel.setJustificationType (juce::Justification::centred);
         nameLabel.setColour (juce::Label::textColourId, juce::Colour (0xffa0d8ff));
-        nameLabel.setMinimumHorizontalScale (0.0f); // allow ellipsis truncation
+        nameLabel.setMinimumHorizontalScale (0.0f);
         addAndMakeVisible (nameLabel);
 
         messageLabel.setText (messageText, juce::dontSendNotification);
@@ -41,11 +40,9 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        // Semi-transparent backdrop over the whole panel.
         g.setColour (juce::Colours::black.withAlpha (0.65f));
         g.fillAll();
 
-        // Dialog card — same style as the preset panel itself.
         auto db = getDialogBounds();
         g.setColour (juce::Colour (0xff18182a));
         g.fillRoundedRectangle (db, 6.0f);
@@ -73,7 +70,6 @@ public:
         yesButton.setBounds (startX + btnW + gap, btnRow.getY(), btnW, 22);
     }
 
-    // Consume all mouse clicks so the panel beneath stays inert.
     void mouseDown (const juce::MouseEvent&) override {}
 
 private:
@@ -94,6 +90,96 @@ private:
 };
 
 //==============================================================================
+// Text-input overlay for naming a new bank.
+class PresetManagerPanel::TextInputOverlay : public juce::Component
+{
+public:
+    TextInputOverlay (const juce::String& titleText,
+                      const juce::String& defaultText,
+                      std::function<void (const juce::String&)> onOk,
+                      std::function<void()> onCancel)
+        : submitCallback (std::move (onOk)),
+          cancelCallback (std::move (onCancel))
+    {
+        setInterceptsMouseClicks (true, true);
+
+        titleLabel.setText (titleText, juce::dontSendNotification);
+        titleLabel.setJustificationType (juce::Justification::centred);
+        titleLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff));
+        addAndMakeVisible (titleLabel);
+
+        editor.setMultiLine (false);
+        editor.setReturnKeyStartsNewLine (false);
+        editor.setText (defaultText);
+        editor.setSelectAllWhenFocused (true);
+        editor.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff1a1a2e));
+        editor.setColour (juce::TextEditor::textColourId,       juce::Colour (0xffa0d8ff));
+        editor.setColour (juce::TextEditor::outlineColourId,    juce::Colour (0xff444466));
+        editor.onReturnKey = [this] { onSubmit(); };
+        addAndMakeVisible (editor);
+
+        okButton.onClick     = [this] { onSubmit(); };
+        cancelButton.onClick = [this] { if (cancelCallback) cancelCallback(); };
+        addAndMakeVisible (okButton);
+        addAndMakeVisible (cancelButton);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.65f));
+        g.fillAll();
+
+        auto db = getDialogBounds();
+        g.setColour (juce::Colour (0xff18182a));
+        g.fillRoundedRectangle (db, 6.0f);
+        g.setColour (juce::Colour (0xffcc88ff).withAlpha (0.55f));
+        g.drawRoundedRectangle (db.reduced (0.5f), 6.0f, 1.5f);
+    }
+
+    void resized() override
+    {
+        auto area = getDialogBounds().toNearestInt().reduced (14);
+
+        titleLabel.setBounds (area.removeFromTop (22));
+        area.removeFromTop (8);
+        editor.setBounds (area.removeFromTop (24));
+        area.removeFromTop (10);
+
+        auto btnRow = area.removeFromTop (24);
+        const int btnW  = 84;
+        const int gap   = 10;
+        const int total = btnW * 2 + gap;
+        const int startX = btnRow.getCentreX() - total / 2;
+        cancelButton.setBounds (startX, btnRow.getY(), btnW, 22);
+        okButton    .setBounds (startX + btnW + gap, btnRow.getY(), btnW, 22);
+    }
+
+    void mouseDown (const juce::MouseEvent&) override {}
+
+private:
+    juce::Rectangle<float> getDialogBounds() const
+    {
+        const float w = 310.0f;
+        const float h = 120.0f;
+        return { (getWidth() - w) / 2.0f, (getHeight() - h) / 2.0f, w, h };
+    }
+
+    void onSubmit()
+    {
+        const auto text = editor.getText().trim();
+        if (text.isNotEmpty() && submitCallback)
+            submitCallback (text);
+    }
+
+    std::function<void (const juce::String&)> submitCallback;
+    std::function<void()> cancelCallback;
+    juce::Label      titleLabel;
+    juce::TextEditor editor;
+    juce::TextButton okButton     { "Create" };
+    juce::TextButton cancelButton { "Cancel" };
+};
+
+//==============================================================================
 PresetManagerPanel::~PresetManagerPanel() = default;
 
 PresetManagerPanel::PresetManagerPanel (PresetManager& pm)
@@ -103,6 +189,22 @@ PresetManagerPanel::PresetManagerPanel (PresetManager& pm)
     titleLabel.setJustificationType (juce::Justification::centred);
     titleLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff));
     addAndMakeVisible (titleLabel);
+
+    // Bank selector row.
+    bankLabel.setText ("Bank:", juce::dontSendNotification);
+    bankLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.7f));
+    addAndMakeVisible (bankLabel);
+
+    bankCombo.setColour (juce::ComboBox::backgroundColourId, juce::Colour (0xff1a1a2e));
+    bankCombo.setColour (juce::ComboBox::textColourId,       juce::Colour (0xffa0d8ff));
+    bankCombo.setColour (juce::ComboBox::outlineColourId,    juce::Colour (0xff444466));
+    bankCombo.onChange = [this] { onBankSelected(); };
+    addAndMakeVisible (bankCombo);
+
+    newBankButton.onClick    = [this] { onNewBank(); };
+    deleteBankButton.onClick = [this] { onDeleteBank(); };
+    addAndMakeVisible (newBankButton);
+    addAndMakeVisible (deleteBankButton);
 
     presetList.setModel (this);
     presetList.setRowHeight (20);
@@ -128,6 +230,7 @@ PresetManagerPanel::PresetManagerPanel (PresetManager& pm)
     addAndMakeVisible (deleteButton);
     addAndMakeVisible (closeButton);
 
+    refreshBankList();
     refreshPresetList();
 }
 
@@ -136,14 +239,81 @@ void PresetManagerPanel::show (juce::Rectangle<int> anchorBounds)
     setBounds (anchorBounds);
     setVisible (true);
     toFront (false);
+    refreshBankList();
     refreshPresetList();
 }
 
 void PresetManagerPanel::hide()
 {
     hideConfirm();
+    hideTextInput();
     setVisible (false);
 }
+
+//==============================================================================
+// Bank management
+//==============================================================================
+
+void PresetManagerPanel::refreshBankList()
+{
+    bankCombo.clear (juce::dontSendNotification);
+    const auto banks = presetManager.getBankNames();
+
+    for (int i = 0; i < banks.size(); ++i)
+        bankCombo.addItem (banks[i], i + 1); // ComboBox IDs are 1-based
+
+    const int idx = banks.indexOf (presetManager.getCurrentBankName());
+    if (idx >= 0)
+        bankCombo.setSelectedId (idx + 1, juce::dontSendNotification);
+    else if (banks.size() > 0)
+        bankCombo.setSelectedId (1, juce::dontSendNotification);
+}
+
+void PresetManagerPanel::onBankSelected()
+{
+    const auto name = bankCombo.getText();
+    if (name.isEmpty() || name == presetManager.getCurrentBankName())
+        return;
+
+    presetManager.setCurrentBank (name);
+    refreshPresetList();
+    nameEditor.setText ("New Preset", juce::dontSendNotification);
+}
+
+void PresetManagerPanel::onNewBank()
+{
+    showTextInput ("New Bank", "My Bank",
+                   [this] (const juce::String& name)
+                   {
+                       hideTextInput();
+                       if (presetManager.createBank (name))
+                       {
+                           presetManager.setCurrentBank (name);
+                           refreshBankList();
+                           refreshPresetList();
+                       }
+                   });
+}
+
+void PresetManagerPanel::onDeleteBank()
+{
+    const auto bankName = presetManager.getCurrentBankName();
+    if (bankName == PresetManager::kDefaultBank)
+        return; // can't delete factory bank
+
+    showConfirm ("Delete Bank", bankName,
+                 "All presets in this bank will be lost.",
+                 "Delete",
+                 [this, bankName]
+                 {
+                     hideConfirm();
+                     presetManager.deleteBank (bankName);
+                     refreshBankList();
+                     refreshPresetList();
+                 });
+}
+
+//==============================================================================
 
 void PresetManagerPanel::refreshPresetList()
 {
@@ -211,7 +381,6 @@ void PresetManagerPanel::navigateBy (int delta)
 
     onLoad (names[next]);
 
-    // Keep internal state in sync even if the panel isn't visible.
     presetNames = names;
     presetList.updateContent();
     presetList.selectRow (next, juce::dontSendNotification);
@@ -234,7 +403,6 @@ void PresetManagerPanel::onSave()
     if (name.isEmpty())
         return;
 
-    // Prompt before overwriting an existing preset.
     if (presetNames.contains (name))
     {
         showConfirm ("Overwrite Preset", name,
@@ -299,14 +467,30 @@ void PresetManagerPanel::hideConfirm()
     if (confirmOverlay)
     {
         removeChildComponent (confirmOverlay.get());
-        // Defer destruction — hideConfirm() may be called from inside the
-        // overlay's button callback.  Destroying the overlay synchronously
-        // would free the std::function (and its captured variables) while
-        // still executing inside it, plus destroy the JUCE Button whose
-        // click handler is on the call stack.  Moving ownership into an
-        // async lambda keeps the overlay alive until the current message
-        // handler finishes.
         auto prevent = std::shared_ptr<ConfirmOverlay> (confirmOverlay.release());
+        juce::MessageManager::callAsync ([prevent] {});
+    }
+}
+
+void PresetManagerPanel::showTextInput (const juce::String& title, const juce::String& defaultText,
+                                         std::function<void (const juce::String&)> onSubmit)
+{
+    hideTextInput();
+    textInputOverlay = std::make_unique<TextInputOverlay> (
+        title, defaultText,
+        std::move (onSubmit),
+        [this] { hideTextInput(); });
+    addAndMakeVisible (*textInputOverlay);
+    textInputOverlay->setBounds (getLocalBounds());
+    textInputOverlay->toFront (true);
+}
+
+void PresetManagerPanel::hideTextInput()
+{
+    if (textInputOverlay)
+    {
+        removeChildComponent (textInputOverlay.get());
+        auto prevent = std::shared_ptr<TextInputOverlay> (textInputOverlay.release());
         juce::MessageManager::callAsync ([prevent] {});
     }
 }
@@ -314,11 +498,9 @@ void PresetManagerPanel::hideConfirm()
 //==============================================================================
 void PresetManagerPanel::paint (juce::Graphics& g)
 {
-    // Dark opaque background.
     g.setColour (juce::Colour (0xff18182a));
     g.fillRoundedRectangle (getLocalBounds().toFloat(), 6.0f);
 
-    // Pink FX bezel border.
     g.setColour (juce::Colour (0xffcc88ff).withAlpha (0.55f));
     g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), 6.0f, 1.5f);
 }
@@ -332,6 +514,19 @@ void PresetManagerPanel::resized()
         auto row = area.removeFromTop (24);
         closeButton.setBounds (row.removeFromRight (24).withSizeKeepingCentre (22, 20));
         titleLabel .setBounds (row);
+    }
+
+    area.removeFromTop (4);
+
+    // Bank selector row.
+    {
+        auto row = area.removeFromTop (24);
+        bankLabel.setBounds (row.removeFromLeft (38));
+        deleteBankButton.setBounds (row.removeFromRight (22).withSizeKeepingCentre (20, 20));
+        row.removeFromRight (2);
+        newBankButton.setBounds (row.removeFromRight (22).withSizeKeepingCentre (20, 20));
+        row.removeFromRight (4);
+        bankCombo.setBounds (row);
     }
 
     area.removeFromTop (6);
@@ -357,4 +552,6 @@ void PresetManagerPanel::resized()
 
     if (confirmOverlay)
         confirmOverlay->setBounds (getLocalBounds());
+    if (textInputOverlay)
+        textInputOverlay->setBounds (getLocalBounds());
 }

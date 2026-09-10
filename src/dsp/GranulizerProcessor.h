@@ -39,6 +39,9 @@ public:
     // Written on the audio thread, read by the UI timer for the waveform marker.
     std::atomic<float> grainOffsetSeconds { -1.0f };
 
+    // Wave-spacing LFO output (sin, [-1..1]) — read by the UI mod indicator.
+    std::atomic<float> lfoOutput { 0.0f };
+
 private:
     struct Grain
     {

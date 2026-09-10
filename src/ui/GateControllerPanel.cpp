@@ -26,6 +26,11 @@ GateControllerPanel::GateControllerPanel (juce::AudioProcessorValueTreeState& ap
 
     // ── Gate volume fader ──────────────────────────────────────────────────────
     gateFader = std::make_unique<DuckFaderButton> (apvts, ParamIDs::gateVolumeAmt, "Gate");
+    gateFader->setTooltip (
+        "Step Volume Gate\n\n"
+        "Controls how much the step sequencer modulates the output volume. "
+        "At 0% the steps have no effect on volume. At 100% the step levels "
+        "fully gate the signal - steps set to zero will silence the audio.");
     addAndMakeVisible (*gateFader);
 
     // ── Division combo ────────────────────────────────────────────────────────

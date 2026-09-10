@@ -24,6 +24,9 @@ void StutterProcessor::prepare (double sampleRate, int /*maxBlockSize*/)
     fadeInRemaining_   = 0;
     fadeInTotal_       = 0;
     loopFadeRemaining_ = 0;
+    loopFadeTotal_     = 0;
+    loopFadeContinuation_ = false;
+    loopFadeReadPos_   = 0;
     loopFadeOldL_      = 0.0f;
     loopFadeOldR_      = 0.0f;
     lastPpq_           = -1.0;
@@ -158,14 +161,12 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
             {
                 const float dryL = (numChannels > 0) ? buffer.getSample (0, s) : 0.0f;
                 const float dryR = (numChannels > 1) ? buffer.getSample (1, s) : 0.0f;
-                const float t = static_cast<float> (fadeOutRemaining_) / static_cast<float> (kCrossfadeSamples);
+                float t = static_cast<float> (fadeOutRemaining_) / static_cast<float> (kCrossfadeSamples);
+                t = t * t * (3.0f - 2.0f * t);  // smoothstep
 
                 if (numChannels > 0) buffer.getWritePointer (0)[s] = lastWetL_ * t + dryL * (1.0f - t);
                 if (numChannels > 1) buffer.getWritePointer (1)[s] = lastWetR_ * t + dryR * (1.0f - t);
 
-                const float decay = static_cast<float> (fadeOutRemaining_ - 1) / static_cast<float> (fadeOutRemaining_);
-                lastWetL_ *= decay;
-                lastWetR_ *= decay;
                 --fadeOutRemaining_;
             }
         }
@@ -301,11 +302,13 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
                     stutterPlayLen_ = juce::jmax (1, static_cast<int> (lengthParam_ * stutterSegLen_));
                     smoothedPlayLen_.setTargetValue (static_cast<float> (stutterPlayLen_));
 
-                    // Crossfade from old tail into new loop head — use the NEW play
-                    // length for the crossfade window so it fits the new segment.
+                    // Crossfade from old tail into new loop head using
+                    // single-sample blend (segment just changed, can't continue).
+                    loopFadeContinuation_ = false;
                     loopFadeOldL_      = lastWetL_;
                     loopFadeOldR_      = lastWetR_;
-                    loopFadeRemaining_ = juce::jmax (1, juce::jmin (kCrossfadeSamples, stutterPlayLen_ / 2));
+                    loopFadeTotal_     = juce::jmax (1, juce::jmin (kCrossfadeSamples, stutterPlayLen_ / 2));
+                    loopFadeRemaining_ = loopFadeTotal_;
                     stutterReadPos_ = 0;
                 }
             }
@@ -344,7 +347,8 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
 
             float wetL = 0.0f, wetR = 0.0f;
 
-            const int xfade = juce::jmax (1, juce::jmin (kCrossfadeSamples, stutterPlayLen_ / 2));
+            const int loopLen = repeatMode ? stutterPlayLen_ : stutterSegLen_;
+            const int xfade   = juce::jmax (1, juce::jmin (kCrossfadeSamples, stutterPlayLen_ / 2));
 
             if (stutterReadPos_ < stutterPlayLen_ && stutterSegLen_ > 0)
             {
@@ -358,7 +362,8 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
                     const int distToEnd = stutterPlayLen_ - stutterReadPos_;
                     if (distToEnd <= xfade)
                     {
-                        const float t = static_cast<float> (distToEnd) / static_cast<float> (xfade);
+                        float t = static_cast<float> (distToEnd) / static_cast<float> (xfade);
+                        t = t * t * (3.0f - 2.0f * t);  // smoothstep
                         wetL *= t;
                         wetR *= t;
                     }
@@ -366,31 +371,41 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
             }
             // else: beyond play length — wet is silence (0)
 
-            // Crossfade at loop-wrap point — blends the tail of the previous
-            // loop iteration into the head of the new one, maintaining signal
-            // level instead of dipping to zero (eliminates clicks at fast rates).
+            // Loop-wrap crossfade.
             if (loopFadeRemaining_ > 0)
             {
-                const float t = static_cast<float> (loopFadeRemaining_) / static_cast<float> (xfade);
-                wetL = loopFadeOldL_ * t + wetL * (1.0f - t);
-                wetR = loopFadeOldR_ * t + wetR * (1.0f - t);
-                const float decay = static_cast<float> (loopFadeRemaining_ - 1)
-                                  / static_cast<float> (loopFadeRemaining_);
-                loopFadeOldL_ *= decay;
-                loopFadeOldR_ *= decay;
+                float oldL, oldR;
+
+                if (loopFadeContinuation_)
+                {
+                    // Continuation mode: read forward from past the loop end.
+                    // Gives a real waveform crossfade for repeat mode.
+                    oldL = readSeg (0, loopFadeReadPos_);
+                    oldR = (numChannels > 1) ? readSeg (1, loopFadeReadPos_) : oldL;
+                    ++loopFadeReadPos_;
+                }
+                else
+                {
+                    // Single-sample mode: blend from frozen last output.
+                    // Used for gate mode and beat-boundary resets.
+                    oldL = loopFadeOldL_;
+                    oldR = loopFadeOldR_;
+                }
+
+                float t = static_cast<float> (loopFadeRemaining_) / static_cast<float> (loopFadeTotal_);
+                t = t * t * (3.0f - 2.0f * t);  // smoothstep
+                wetL = oldL * t + wetL * (1.0f - t);
+                wetR = oldR * t + wetR * (1.0f - t);
                 --loopFadeRemaining_;
             }
 
             // Crossfade when play length shrunk and read pos wrapped.
             if (lenWrapFading_ && lenWrapFadeRemain_ > 0)
             {
-                const float t = static_cast<float> (lenWrapFadeRemain_) / static_cast<float> (lenWrapFadeTotal_);
+                float t = static_cast<float> (lenWrapFadeRemain_) / static_cast<float> (lenWrapFadeTotal_);
+                t = t * t * (3.0f - 2.0f * t);  // smoothstep
                 wetL = lenWrapOldL_ * t + wetL * (1.0f - t);
                 wetR = lenWrapOldR_ * t + wetR * (1.0f - t);
-                const float decay = static_cast<float> (lenWrapFadeRemain_ - 1)
-                                  / static_cast<float> (lenWrapFadeRemain_);
-                lenWrapOldL_ *= decay;
-                lenWrapOldR_ *= decay;
                 --lenWrapFadeRemain_;
                 if (lenWrapFadeRemain_ <= 0)
                     lenWrapFading_ = false;
@@ -400,7 +415,8 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
             if (fadeInRemaining_ > 0)
             {
                 const int denom = juce::jmax (1, fadeInTotal_);
-                const float t = 1.0f - static_cast<float> (fadeInRemaining_) / static_cast<float> (denom);
+                float t = 1.0f - static_cast<float> (fadeInRemaining_) / static_cast<float> (denom);
+                t = t * t * (3.0f - 2.0f * t);  // smoothstep
                 wetL = dryL * (1.0f - t) + wetL * t;
                 wetR = dryR * (1.0f - t) + wetR * t;
                 --fadeInRemaining_;
@@ -418,31 +434,45 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
             // stutterPlayLen_ are silent, controlled by the Len knob.
             // Repeat mode: loop at stutterPlayLen_ directly — shorter Len
             // means a shorter loop and faster repetition, no silent gap.
-            const int loopLen = repeatMode ? stutterPlayLen_ : stutterSegLen_;
             if (stutterReadPos_ >= loopLen)
             {
-                stutterReadPos_ = 0;
+                // In repeat mode with play length shorter than the full segment,
+                // use continuation crossfade: read forward from the capture
+                // buffer past the play length.  The "old" signal follows the
+                // real waveform instead of freezing at a single sample value.
+                // This eliminates the DC-like artifact that low-pitched audio
+                // makes audible over a long crossfade window.
+                //
+                // Gate mode uses the single-sample approach because the audio
+                // has already faded to silence, so the crossfade is effectively
+                // a smooth fade-in from ~0 — no frozen-constant artifact.
+                const bool useContinuation = repeatMode
+                                          && stutterPlayLen_ < stutterSegLen_;
 
-                // Trigger a crossfade from the tail of the finished loop into the
-                // head of the new one.  lastWetL_/R_ holds the processed output
-                // of the sample just before the wrap.
-                loopFadeOldL_      = lastWetL_;
-                loopFadeOldR_      = lastWetR_;
-                loopFadeRemaining_ = xfade;
+                loopFadeContinuation_ = useContinuation;
+                if (useContinuation)
+                {
+                    loopFadeReadPos_ = loopLen;  // continue past loop end
+                }
+                else
+                {
+                    loopFadeOldL_ = lastWetL_;
+                    loopFadeOldR_ = lastWetR_;
+                }
+
+                loopFadeTotal_     = juce::jmax (1, juce::jmin (kCrossfadeSamples, loopLen / 2));
+                loopFadeRemaining_ = loopFadeTotal_;
+                stutterReadPos_    = 0;
             }
         }
         else if (fadeOutRemaining_ > 0)
         {
-            // Crossfade from last wet output back to dry.
-            const float t = static_cast<float> (fadeOutRemaining_) / static_cast<float> (kCrossfadeSamples);
+            // Crossfade from last wet output back to dry using smoothstep.
+            float t = static_cast<float> (fadeOutRemaining_) / static_cast<float> (kCrossfadeSamples);
+            t = t * t * (3.0f - 2.0f * t);  // smoothstep
 
             if (numChannels > 0) buffer.getWritePointer (0)[s] = lastWetL_ * t + dryL * (1.0f - t);
             if (numChannels > 1) buffer.getWritePointer (1)[s] = lastWetR_ * t + dryR * (1.0f - t);
-
-            // Decay the saved wet sample towards zero so the tail fades smoothly.
-            const float decay = static_cast<float> (fadeOutRemaining_ - 1) / static_cast<float> (fadeOutRemaining_);
-            lastWetL_ *= decay;
-            lastWetR_ *= decay;
 
             --fadeOutRemaining_;
         }

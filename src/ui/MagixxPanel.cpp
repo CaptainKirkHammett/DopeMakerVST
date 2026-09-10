@@ -64,63 +64,94 @@ MagixxPanel::MagixxPanel (juce::AudioProcessorValueTreeState& apvts)
     slicerAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         apvts, ParamIDs::slicerEnabled, slicerButton);
 
-    // Grey out Rate/Depth knobs and labels when either override mode is active.
-    auto syncDisabledVisual = [this]
+    // Slice1 button: random slice mode — only the Slice Start key triggers, plays a random slice.
+    slicerRandomButton.setTooltip (
+        "Slice1 - Random Slice Mode\n\n"
+        "The Slice Start key picks a random slice each time you press it. "
+        "All other slice keys play their assigned slices normally.\n\n"
+        "Use this to add unpredictable chops on the trigger key while keeping "
+        "regular slice access on the rest of the keyboard.");
+    addAndMakeVisible (slicerRandomButton);
+    slicerRandomAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        apvts, ParamIDs::slicerRandomEnabled, slicerRandomButton);
+
+    // Unified visual state update: manages alpha, enabled, and lfoDisabled for
+    // both Rate and Depth sliders based on sync, step, and slicer button states.
+    // Called from every button/combo callback that can affect the knob state.
+    auto updateStartLfoVisuals = [this]
     {
-        const bool  disabled = stepOverrideButton.getToggleState() || slicerButton.getToggleState();
-        const float a        = disabled ? 0.35f : 1.0f;
-        startRateSlider .setAlpha (a);
-        startDepthSlider.setAlpha (a);
-        startRateLabel  .setAlpha (a);
-        startDepthLabel .setAlpha (a);
-        startRateSlider .getProperties().set ("lfoDisabled", disabled);
-        startDepthSlider.getProperties().set ("lfoDisabled", disabled);
-        startRateSlider .repaint();
+        const bool synced   = syncButton.getToggleState();
+        const bool override = stepOverrideButton.getToggleState()
+                           || slicerButton.getToggleState()
+                           || slicerRandomButton.getToggleState();
+
+        // Rate is disabled by sync OR any override mode.
+        const bool rateOff  = synced || override;
+        const float rateA   = rateOff ? 0.35f : 1.0f;
+        startRateSlider.setAlpha   (rateA);
+        startRateLabel .setAlpha   (rateA);
+        startRateSlider.setEnabled (! rateOff);
+        startRateSlider.getProperties().set ("lfoDisabled", rateOff);
+        startRateSlider.repaint();
+
+        // Depth is disabled only by override modes (sync doesn't affect depth).
+        const float depthA = override ? 0.35f : 1.0f;
+        startDepthSlider.setAlpha   (depthA);
+        startDepthLabel .setAlpha   (depthA);
+        startDepthSlider.setEnabled (! override);
+        startDepthSlider.getProperties().set ("lfoDisabled", override);
         startDepthSlider.repaint();
+
+        // Sync division box.
+        const float divA = synced ? 1.0f : 0.35f;
+        syncDivBox.setAlpha   (divA);
+        syncDivBox.setEnabled (synced);
     };
 
-    // Mutual exclusion: turning one ON turns the other OFF, then syncs visuals.
-    stepOverrideButton.onStateChange = [this, syncDisabledVisual]
+    // Mutual exclusion: Step is exclusive with Slicer/Slice1.
+    // Slice1 is a sub-mode of Slicer — both stay on together.
+    stepOverrideButton.onStateChange = [this, updateStartLfoVisuals]
     {
         if (stepOverrideButton.getToggleState())
         {
             slicerButton.setToggleState (false, juce::sendNotification);
-            // Auto-enable the step controller when Step mode is turned on.
+            slicerRandomButton.setToggleState (false, juce::sendNotification);
             if (this->apvts.getRawParameterValue (ParamIDs::gateEnabled)->load() < 0.5f)
                 if (auto* p = this->apvts.getParameter (ParamIDs::gateEnabled))
                     p->setValueNotifyingHost (1.0f);
         }
-        syncDisabledVisual();
+        updateStartLfoVisuals();
     };
-    slicerButton.onStateChange = [this, syncDisabledVisual]
+    slicerButton.onStateChange = [this, updateStartLfoVisuals]
     {
         if (slicerButton.getToggleState())
+        {
             stepOverrideButton.setToggleState (false, juce::sendNotification);
-        syncDisabledVisual();
+        }
+        else
+        {
+            // Turning Slicer off also turns off Slice1 (it depends on Slicer).
+            slicerRandomButton.setToggleState (false, juce::sendNotification);
+        }
+        updateStartLfoVisuals();
     };
-    syncDisabledVisual();   // apply immediately (e.g. after project restore)
-
-    // Grey out Start Rate knob when Sync is active (rate is ignored in sync mode).
-    auto startSyncVisual = [this]
+    slicerRandomButton.onStateChange = [this, updateStartLfoVisuals]
     {
-        const bool synced = syncButton.getToggleState();
-        const bool disabled = synced || stepOverrideButton.getToggleState() || slicerButton.getToggleState();
-        const float a = disabled ? 0.35f : 1.0f;
-        startRateSlider.setAlpha (a);
-        startRateLabel .setAlpha (a);
-        startRateSlider.setEnabled (! disabled);
-        startRateSlider.repaint();
+        if (slicerRandomButton.getToggleState())
+        {
+            stepOverrideButton.setToggleState (false, juce::sendNotification);
+            if (! slicerButton.getToggleState())
+                slicerButton.setToggleState (true, juce::sendNotification);
+        }
+        updateStartLfoVisuals();
+    };
+    syncButton.onStateChange = updateStartLfoVisuals;
 
-        const float divA = synced ? 1.0f : 0.35f;
-        syncDivBox.setAlpha (divA);
-        syncDivBox.setEnabled (synced);
-    };
-    syncButton.onStateChange = [startSyncVisual, syncDisabledVisual]
-    {
-        syncDisabledVisual();
-        startSyncVisual();
-    };
-    startSyncVisual();
+    // Re-evaluate knob state when waveform changes — the ComboBox popup's
+    // modal cycle can leave the slider's enabled state stale on some hosts.
+    startWaveBox.onChange = [updateStartLfoVisuals] { updateStartLfoVisuals(); };
+
+    updateStartLfoVisuals();   // apply immediately (e.g. after project restore)
 
     // ── Velocity LFO ─────────────────────────────────────────────────────────
     velLfoTitle.getProperties().set ("customFont", true);
@@ -167,6 +198,7 @@ MagixxPanel::MagixxPanel (juce::AudioProcessorValueTreeState& apvts)
         velSyncDivBox.setEnabled (synced);
     };
     velSyncButton.onStateChange = velSyncVisual;
+    velWaveBox.onChange = [velSyncVisual] { velSyncVisual(); };
     velSyncVisual();
 
     addAndMakeVisible (velMeter);
@@ -225,6 +257,7 @@ MagixxPanel::MagixxPanel (juce::AudioProcessorValueTreeState& apvts)
         relSyncDivBox.setEnabled (synced);
     };
     relSyncButton.onStateChange = relSyncVisual;
+    relWaveBox.onChange = [relSyncVisual] { relSyncVisual(); };
     relSyncVisual();
 
     // ── Pitch LFO ─────────────────────────────────────────────────────────────
@@ -272,6 +305,7 @@ MagixxPanel::MagixxPanel (juce::AudioProcessorValueTreeState& apvts)
         pitchSyncDivBox.setEnabled (synced);
     };
     pitchSyncButton.onStateChange = pitchSyncVisual;
+    pitchWaveBox.onChange = [pitchSyncVisual] { pitchSyncVisual(); };
     pitchSyncVisual();
 }
 
@@ -422,14 +456,15 @@ void MagixxPanel::resized()
         startDepthLabel .setBounds (depthCol.removeFromTop (lblH));
         startDepthSlider.setBounds (depthCol.removeFromTop (kW).withWidth (kW));
 
-        constexpr int btnH   = 24;
+        constexpr int btnH   = 22;
         constexpr int btnGap = 2;
-        const int stackH  = btnH * 2 + btnGap;
+        const int stackH  = btnH * 3 + btnGap * 2;
         const int btnX    = col.getX();
         const int btnW    = juce::jmax (38, col.getWidth());
         const int btnTopY = knobRowY + lblH + (kW - stackH) / 2;
-        stepOverrideButton.setBounds (btnX, btnTopY,                 btnW, btnH);
-        slicerButton      .setBounds (btnX, btnTopY + btnH + btnGap, btnW, btnH);
+        stepOverrideButton.setBounds (btnX, btnTopY,                          btnW, btnH);
+        slicerButton      .setBounds (btnX, btnTopY + btnH + btnGap,          btnW, btnH);
+        slicerRandomButton.setBounds (btnX, btnTopY + (btnH + btnGap) * 2,    btnW, btnH);
     }
 
     layoutLfoColumn (inner2, relLfoTitle,

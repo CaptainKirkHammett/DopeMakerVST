@@ -207,32 +207,56 @@ void SamplerEngine::noteOn (int midiNote, float velocity)
     // Slicer: divide [startPos, endPos] into N equal slices; each MIDI note plays one slice.
     if (slicerEnabled.load (std::memory_order_relaxed))
     {
-        const int loNote    = slicerLoNote.load (std::memory_order_relaxed);
-        const int numSlices = sliceCount.load   (std::memory_order_relaxed);
+        const int  loNote     = slicerLoNote.load (std::memory_order_relaxed);
+        const int  numSlices  = sliceCount.load   (std::memory_order_relaxed);
+        const bool randomMode = slicerRandomEnabled.load (std::memory_order_relaxed);
 
-        // Notes outside the slice key range are silenced entirely.
-        if (midiNote < loNote || midiNote >= loNote + numSlices)
+        if (randomMode)
         {
-            lastNoteReject.store (kSlicerRange, std::memory_order_relaxed);
-            noteOnRejections.fetch_add (1, std::memory_order_relaxed);
-            DBG ("SamplerEngine::noteOn REJECTED — slicer range (note="
-                 + juce::String (midiNote) + " range=" + juce::String (loNote)
-                 + "-" + juce::String (loNote + numSlices - 1) + ")");
-            return;
+            // Slice1: the Slice Start key picks a random slice; all other
+            // slice keys play their assigned slice normally.
+            if (midiNote < loNote || midiNote >= loNote + numSlices)
+            {
+                lastNoteReject.store (kSlicerRange, std::memory_order_relaxed);
+                noteOnRejections.fetch_add (1, std::memory_order_relaxed);
+                DBG ("SamplerEngine::noteOn REJECTED — Slice1 range (note="
+                     + juce::String (midiNote) + " range=" + juce::String (loNote)
+                     + "-" + juce::String (loNote + numSlices - 1) + ")");
+                return;
+            }
+
+            const int sliceIdx = (midiNote == loNote)
+                ? rng.nextInt (numSlices)
+                : juce::jlimit (0, numSlices - 1, midiNote - loNote);
+
+            const float origStart  = voiceParamsTemplate.startPos;
+            const float origEnd    = voiceParamsTemplate.endPos;
+            const float sliceWidth = (origEnd - origStart) / static_cast<float> (numSlices);
+            p.startPos = origStart + static_cast<float> (sliceIdx)     * sliceWidth;
+            p.endPos   = origStart + static_cast<float> (sliceIdx + 1) * sliceWidth;
+            p.rootNote = midiNote;
         }
+        else
+        {
+            // Normal slicer: notes outside the slice key range are silenced entirely.
+            if (midiNote < loNote || midiNote >= loNote + numSlices)
+            {
+                lastNoteReject.store (kSlicerRange, std::memory_order_relaxed);
+                noteOnRejections.fetch_add (1, std::memory_order_relaxed);
+                DBG ("SamplerEngine::noteOn REJECTED — slicer range (note="
+                     + juce::String (midiNote) + " range=" + juce::String (loNote)
+                     + "-" + juce::String (loNote + numSlices - 1) + ")");
+                return;
+            }
 
-        const int   sliceIdx   = juce::jlimit (0, numSlices - 1, midiNote - loNote);
-        // Use raw template bounds so the LFO offset is ignored.
-        const float origStart  = voiceParamsTemplate.startPos;
-        const float origEnd    = voiceParamsTemplate.endPos;
-        const float sliceWidth = (origEnd - origStart) / static_cast<float> (numSlices);
-        p.startPos = origStart + static_cast<float> (sliceIdx)     * sliceWidth;
-        p.endPos   = origStart + static_cast<float> (sliceIdx + 1) * sliceWidth;
-
-        // All slices play at the root note pitch — no transposition between keys.
-        // Setting rootNote = midiNote makes the voice compute a 1:1 playback ratio,
-        // while still storing midiNote correctly so noteOff stops the right voice.
-        p.rootNote = midiNote;
+            const int   sliceIdx   = juce::jlimit (0, numSlices - 1, midiNote - loNote);
+            const float origStart  = voiceParamsTemplate.startPos;
+            const float origEnd    = voiceParamsTemplate.endPos;
+            const float sliceWidth = (origEnd - origStart) / static_cast<float> (numSlices);
+            p.startPos = origStart + static_cast<float> (sliceIdx)     * sliceWidth;
+            p.endPos   = origStart + static_cast<float> (sliceIdx + 1) * sliceWidth;
+            p.rootNote = midiNote;
+        }
     }
 
     // Clear rejection status on a successful note-on.
@@ -242,12 +266,17 @@ void SamplerEngine::noteOn (int midiNote, float velocity)
     if (onNoteOn)
         onNoteOn();
 
-    // Stop any voices already playing this MIDI note so they don't pile up
-    // in release phase and exhaust the voice pool during rapid retriggering.
+    // In poly mode, only stop voices that are still held — voices already in
+    // their ADSR release phase are left to ring out naturally, giving true
+    // polyphonic overlap when the same key retriggers (e.g. with changing
+    // start position).  In mono mode, stop all matching voices immediately.
     for (int i = 0; i < activeVoiceCount; ++i)
     {
         if (voices[i].isActive() && voices[i].getCurrentMidiNote() == midiNote)
-            voices[i].stopNote (false);
+        {
+            if (monoMode || voices[i].isNoteHeld())
+                voices[i].stopNote (false);
+        }
     }
 
     if (monoMode)

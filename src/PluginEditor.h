@@ -218,7 +218,8 @@ private:
 };
 
 class PluginEditor : public juce::AudioProcessorEditor,
-                     private juce::AudioProcessorValueTreeState::Listener
+                     private juce::AudioProcessorValueTreeState::Listener,
+                     private juce::Timer
 {
 public:
     explicit PluginEditor (PluginProcessor& p);
@@ -243,6 +244,8 @@ private:
     juce::Label        betaLabel;
     LogoButton         logoButton;
     juce::Label        contactLabel;
+    juce::ToggleButton bqButton          { "BQ" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bqAttach;
     juce::ToggleButton zcButton          { "ZC" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> zcAttach;
     juce::TextButton   loadButton        { "Load Sample" };
@@ -308,6 +311,11 @@ private:
 
     // APVTS::Listener — notified on parameter changes to update paramDisplay.
     void parameterChanged (const juce::String& paramId, float newValue) override;
+
+    // One-shot timer: re-reads the preset name and sample from the processor
+    // shortly after construction, catching DAWs that call setStateInformation
+    // after createEditor.
+    void timerCallback() override;
 
     void onLoadButtonClicked();
     void onDefaultButtonClicked();

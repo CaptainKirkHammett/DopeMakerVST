@@ -32,6 +32,21 @@ GranulizerPanel::GranulizerPanel (juce::AudioProcessorValueTreeState& apvts)
     depthAttach       = makeKnob (depthSlider,       depthLabel,       ParamIDs::granDepth,       "Amt");
     speedAttach       = makeKnob (speedSlider,       speedLabel,       ParamIDs::granSpeed,       "Spd");
     randAttach        = makeKnob (randSlider,        randLabel,        ParamIDs::granRand,        "Rnd");
+
+    lfoModIndicator.setStyle (LfoModIndicator::Style::RimTip);
+    addAndMakeVisible (lfoModIndicator);
+}
+
+void GranulizerPanel::setModSources (std::atomic<float>* lfoOutput,
+                                     std::atomic<float>* depthBase,
+                                     std::atomic<float>* waveSpacingBase)
+{
+    lfoModIndicator.setPointerColour (SuomiLookAndFeel::kModIndicatorFx);
+    lfoModIndicator.setModType (LfoModIndicator::ModType::MultiplicativeBipolar);
+    lfoModIndicator.setBaseSource (waveSpacingBase);
+    lfoModIndicator.setNormalisableRange (
+        juce::NormalisableRange<float> (-3.0f, 3.0f));
+    lfoModIndicator.setSource (lfoOutput, depthBase);
 }
 
 void GranulizerPanel::paint (juce::Graphics&)
@@ -67,4 +82,6 @@ void GranulizerPanel::resized()
         labels[i]->setBounds (col);
         sliders[i]->setBounds (col.withSizeKeepingCentre (juce::jmin (knobW, 48), knobH));
     }
+
+    lfoModIndicator.setBounds (waveSpacingSlider.getBounds());
 }

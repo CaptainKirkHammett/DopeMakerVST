@@ -133,8 +133,17 @@ public:
     // Peak-normalize gain factor (1 / peak) — set in loadSampleFile, read by processBlock.
     std::atomic<float> normalizeGain { 1.0f };
 
+    // Request a DSP flush from the UI thread — the actual flush happens at the
+    // start of the next processBlock() so it is thread-safe.
+    void requestDspFlush() { dspFlushRequested.store (true, std::memory_order_release); }
 
 private:
+    // Clears all DSP buffers/state — must only be called on the audio thread.
+    void flushAllDspState();
+
+    // Set by the UI thread, checked/cleared at the top of processBlock().
+    std::atomic<bool> dspFlushRequested { false };
+
     std::unique_ptr<SamplerEngine> engine;
     FilterProcessor      filterProc;
     DistortionProcessor  distProc;
@@ -191,7 +200,6 @@ private:
     void setupLfoNoteOnCallback();
     void updateLfoAndPushOffset    (int numSamples);
     void updateVelLfoAndPushOffset (int numSamples);
-    void flushAllDspState();  // clears all DSP buffers/state on preset change
 
     // APVTS::Listener — enforces sampleStartPos < sampleEndPos.
     void parameterChanged (const juce::String& parameterID, float newValue) override;

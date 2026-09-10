@@ -102,6 +102,7 @@ void PhaserPanel::paint (juce::Graphics& g)
 void PhaserPanel::resized()
 {
     auto area = getLocalBounds().reduced (4);
+    area.removeFromLeft (2);
 
     enableButton.setBounds (area.removeFromLeft (100).withSizeKeepingCentre (100, 24));
     area.removeFromLeft (8);

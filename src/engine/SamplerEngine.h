@@ -51,6 +51,7 @@ public:
     std::atomic<bool>  slicerEnabled { false };
     std::atomic<int>   slicerLoNote  { 60 };   // MIDI note for first slice (Slice Start key, C3)
     std::atomic<int>   sliceCount    { 16 };   // Number of slices (1–128)
+    std::atomic<bool>  slicerRandomEnabled { false }; // Slice1: only trigger note plays a random slice
 
     // Current velocity LFO offset [-1, 1]; added to incoming note velocity at note-on.
     std::atomic<float> velLfoOffset { 0.0f };

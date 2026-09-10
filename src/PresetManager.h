@@ -1,16 +1,18 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 
-// Manages presets for Dope Maker VST.
-// Each preset is an XML file storing the full APVTS state and an optional
-// relative path to its audio sample (which is copied into a Samples/ subfolder
-// inside the bank directory when saving).
+// Manages presets for Dope Maker VST, organised into banks.
+// Each bank is a subfolder under the Presets root, containing .dmpreset
+// files and a Samples/ subfolder for bundled audio.
 //
 // Layout on disk:
-//   <AppData>/DopeMakerVST/Presets/Default Bank/
-//       MyPreset.dmpreset
-//       Samples/
-//           MyPreset_drums.wav
+//   <AppData>/DopeMakerVST/Presets/
+//       Fvcktory Bank/
+//           MyPreset.dmpreset
+//           Samples/
+//               MyPreset_drums.wav
+//       User Bank/
+//           ...
 class PresetManager
 {
 public:
@@ -23,16 +25,37 @@ public:
     // Root directory: <AppData>/DopeMakerVST/Presets/
     static juce::File getPresetsRoot();
 
-    // Bank directory (Default Bank).
+    //==================================================================
+    // Bank management
+    //==================================================================
+
+    // Alphabetically sorted list of all bank names on disk.
+    juce::StringArray getBankNames() const;
+
+    const juce::String& getCurrentBankName() const noexcept { return currentBankName; }
+
+    // Switch to an existing bank. Clears the current preset name.
+    void setCurrentBank (const juce::String& bankName);
+
+    // Create a new empty bank folder. Returns true on success.
+    bool createBank (const juce::String& bankName);
+
+    // Delete a bank and all its presets. Returns true on success.
+    bool deleteBank (const juce::String& bankName);
+
+    //==================================================================
+    // Bank directory for the active bank.
     juce::File getBankDirectory() const;
 
-    // Samples subfolder inside the bank.
+    // Samples subfolder inside the active bank.
     juce::File getSamplesDirectory() const;
 
     // Alphabetically sorted list of preset names (without extension).
     juce::StringArray getPresetNames() const;
 
     const juce::String& getCurrentPresetName() const noexcept { return currentPresetName; }
+    void setCurrentPresetName (const juce::String& name)       { currentPresetName = name; }
+    void setCurrentBankName   (const juce::String& name)       { currentBankName = name; }
 
     // Saves the current APVTS state and optionally copies the sample file.
     // Returns true on success.
@@ -46,6 +69,7 @@ public:
 
 private:
     juce::AudioProcessorValueTreeState& apvts;
+    juce::String currentBankName;
     juce::String currentPresetName;
 
     juce::File getPresetFile (const juce::String& presetName) const;

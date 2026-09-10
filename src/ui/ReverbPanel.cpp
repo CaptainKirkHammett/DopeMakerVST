@@ -2,11 +2,15 @@
 #include "../ParameterIDs.h"
 
 ReverbPanel::ReverbPanel (juce::AudioProcessorValueTreeState& apvts)
+    : apvts (apvts)
 {
     enableButton.getProperties().set ("fxButton", true);
     addAndMakeVisible (enableButton);
     enableAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         apvts, ParamIDs::reverbEnabled, enableButton);
+
+    duckFader = std::make_unique<DuckFaderButton> (apvts, ParamIDs::reverbDuck);
+    addAndMakeVisible (*duckFader);
 
     auto makeKnob = [&] (juce::Slider& sl, const juce::String& id, const juce::String& label) {
         sl.setSliderStyle (juce::Slider::RotaryVerticalDrag);
@@ -22,6 +26,9 @@ ReverbPanel::ReverbPanel (juce::AudioProcessorValueTreeState& apvts)
     dampingAttach  = makeKnob (dampingSlider,  ParamIDs::reverbDamping,  "Damp");
     widthAttach    = makeKnob (widthSlider,    ParamIDs::reverbWidth,    "Width");
     mixAttach      = makeKnob (mixSlider,      ParamIDs::reverbMix,      "Mix");
+
+    duckModIndicator.setStyle (LfoModIndicator::Style::RimTip);
+    addAndMakeVisible (duckModIndicator);
 
     addAndMakeVisible (reverseButton);
     reverseAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
@@ -46,6 +53,16 @@ ReverbPanel::ReverbPanel (juce::AudioProcessorValueTreeState& apvts)
     updateSyncVisuals();
 }
 
+void ReverbPanel::setDuckModSources (std::atomic<float>* mixBase,
+                                     std::atomic<float>* duckLfoOutput,
+                                     std::atomic<float>* duckLfoDepth)
+{
+    duckModIndicator.setPointerColour (SuomiLookAndFeel::kModIndicatorFx);
+    duckModIndicator.setCenterSource (mixBase);
+    duckModIndicator.setDestinationRange (0.0f, 1.0f);
+    duckModIndicator.setSource (duckLfoOutput, duckLfoDepth);
+}
+
 void ReverbPanel::updateSyncVisuals()
 {
     const bool synced = revSyncButton.getToggleState();
@@ -67,9 +84,12 @@ void ReverbPanel::paint (juce::Graphics& g)
 void ReverbPanel::resized()
 {
     auto area = getLocalBounds().reduced (4);
+    area.removeFromLeft (2);
 
     enableButton.setBounds (area.removeFromLeft (100).withSizeKeepingCentre (100, 24));
     area.removeFromLeft (8);
+    duckFader->setBounds (area.removeFromLeft (55).withSizeKeepingCentre (55, 24));
+    area.removeFromLeft (6);
 
     constexpr int knobW = 61;
     constexpr int gap   = 2;
@@ -83,6 +103,9 @@ void ReverbPanel::resized()
     addKnob (dampingSlider);
     addKnob (widthSlider);
     addKnob (mixSlider);
+
+    // Duck mod indicator overlays the mix knob.
+    duckModIndicator.setBounds (mixSlider.getBounds());
 
     area.removeFromLeft (6);
     reverseButton.setBounds (area.removeFromLeft (50).withSizeKeepingCentre (50, 24));

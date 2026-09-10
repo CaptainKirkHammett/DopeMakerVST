@@ -62,9 +62,16 @@ private:
     int   fadeInRemaining_  = 0;  // samples remaining in fade-in at stutter start
     int   fadeInTotal_      = 0;  // initial fadeInRemaining_ value (used as denominator)
 
-    // Crossfade at loop-wrap points to maintain signal level (avoids zero-crossing clicks).
+    // Loop-wrap crossfade.  Two modes:
+    //  • Continuation (repeat mode, playLen < segLen): reads forward from the
+    //    capture buffer past the play length, giving a real waveform crossfade.
+    //  • Single-sample (gate mode or when continuation is unavailable): blends
+    //    from the frozen last output sample — simpler, always continuous.
     int   loopFadeRemaining_ = 0;
-    float loopFadeOldL_      = 0.0f;
+    int   loopFadeTotal_     = 0;     // denominator — fixed at trigger time
+    bool  loopFadeContinuation_ = false;  // true = read from capture buffer
+    int   loopFadeReadPos_   = 0;     // continuation read position
+    float loopFadeOldL_      = 0.0f;  // single-sample fallback
     float loopFadeOldR_      = 0.0f;
 
     // Saved last wet sample for fade-out after stutter deactivates.

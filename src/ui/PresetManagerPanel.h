@@ -36,6 +36,13 @@ private:
     juce::File     currentSampleFile;
 
     juce::Label       titleLabel;
+
+    // Bank selector row.
+    juce::Label       bankLabel;
+    juce::ComboBox    bankCombo;
+    juce::TextButton  newBankButton    { "+" };
+    juce::TextButton  deleteBankButton { "-" };
+
     juce::ListBox     presetList;
     juce::StringArray presetNames;
     juce::TextEditor  nameEditor;
@@ -53,6 +60,11 @@ private:
     void onSave();
     void onDelete();
 
+    void refreshBankList();
+    void onBankSelected();
+    void onNewBank();
+    void onDeleteBank();
+
     // Themed confirmation overlay (replaces system AlertWindow).
     class ConfirmOverlay;
     std::unique_ptr<ConfirmOverlay> confirmOverlay;
@@ -60,6 +72,13 @@ private:
                       const juce::String& message, const juce::String& confirmText,
                       std::function<void()> onConfirm);
     void hideConfirm();
+
+    // Text-input overlay for naming a new bank.
+    class TextInputOverlay;
+    std::unique_ptr<TextInputOverlay> textInputOverlay;
+    void showTextInput (const juce::String& title, const juce::String& defaultText,
+                        std::function<void (const juce::String&)> onSubmit);
+    void hideTextInput();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PresetManagerPanel)
 };

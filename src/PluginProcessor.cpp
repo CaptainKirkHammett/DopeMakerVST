@@ -62,6 +62,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         [] (float v, int) { return juce::String (v, 4); }));
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         ParamIDs::zcPerChannel, "ZC Per Channel", false));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        ParamIDs::hqInterpolation, "HQ Interpolation", false));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::sampleDirection, "Sample Direction",
         juce::StringArray { "Sample FW", "Sample BW", "FW/BW Rnd" }, 0));
@@ -130,6 +132,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
             ParamIDs::slicerLoNote, "Slice Start", noteNames, 60)); // C3 (middle C)
         params.push_back (std::make_unique<juce::AudioParameterChoice> (
             ParamIDs::sliceCount, "Slices", sliceCounts, 15)); // index 15 = 16 slices (default)
+        params.push_back (std::make_unique<juce::AudioParameterBool> (
+            ParamIDs::slicerRandomEnabled, "Slice1 Random Mode", false));
     }
 
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
@@ -362,6 +366,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         juce::NormalisableRange<float> (0.0f, 1.0f), 0.3f,
         juce::String(), juce::AudioProcessorParameter::genericParameter,
         [] (float v, int) { return juce::String (v, 3); }));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        ParamIDs::reverbDuck, "Reverb Duck",
+        juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f));
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         ParamIDs::reverbReverse, "Reverb Reverse", false));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
@@ -585,6 +592,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::suppressorAmt, "Suppressor Amount",
         juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        ParamIDs::suppressorFFT, "AutoEQ FFT Mode", false));
 
     // --- Arpeggiator ---
     params.push_back (std::make_unique<juce::AudioParameterBool> (
@@ -788,6 +797,14 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 {
     juce::ScopedNoDenormals noDenormals;
 
+    // If a preset switch requested a DSP flush, do it here on the audio thread
+    // before any new audio is processed — prevents spillover from the old preset.
+    if (dspFlushRequested.exchange (false, std::memory_order_acquire))
+    {
+        flushAllDspState();
+        buffer.clear();
+    }
+
     // Clear any channels not used for output.
     for (int i = getTotalNumInputChannels(); i < getTotalNumOutputChannels(); ++i)
         buffer.clear (i, 0, buffer.getNumSamples());
@@ -804,7 +821,8 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         auto& vp = engine->voiceParamsTemplate;
         vp.startPos      = apvts.getRawParameterValue (ParamIDs::sampleStartPos)->load();
         vp.endPos        = apvts.getRawParameterValue (ParamIDs::sampleEndPos)->load();
-        vp.perChannelZC  = apvts.getRawParameterValue (ParamIDs::zcPerChannel)->load() > 0.5f;
+        vp.perChannelZC    = apvts.getRawParameterValue (ParamIDs::zcPerChannel)->load() > 0.5f;
+        vp.hqInterpolation = apvts.getRawParameterValue (ParamIDs::hqInterpolation)->load() > 0.5f;
         {
             const int dirIdx = static_cast<int> (
                 apvts.getRawParameterValue (ParamIDs::sampleDirection)->load());
@@ -996,6 +1014,9 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // sliceCount parameter is 0-indexed (choice index); add 1 to get actual slice count.
     engine->sliceCount.store (
         static_cast<int> (apvts.getRawParameterValue (ParamIDs::sliceCount)->load()) + 1,
+        std::memory_order_relaxed);
+    engine->slicerRandomEnabled.store (
+        apvts.getRawParameterValue (ParamIDs::slicerRandomEnabled)->load() > 0.5f,
         std::memory_order_relaxed);
 
     // (Stutter is now an audio effect — processed later in the FX chain, before the filter.)
@@ -1386,11 +1407,14 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
         if (active)
         {
-            const float roomSize  = apvts.getRawParameterValue (ParamIDs::reverbRoomSize)->load();
-            const float damping   = apvts.getRawParameterValue (ParamIDs::reverbDamping)->load();
-            const float width     = apvts.getRawParameterValue (ParamIDs::reverbWidth)->load();
-            const float mix       = apvts.getRawParameterValue (ParamIDs::reverbMix)->load();
-            const bool  reverse   = apvts.getRawParameterValue (ParamIDs::reverbReverse)->load() > 0.5f;
+            const float roomSize   = apvts.getRawParameterValue (ParamIDs::reverbRoomSize)->load();
+            const float damping    = apvts.getRawParameterValue (ParamIDs::reverbDamping)->load();
+            const float width      = apvts.getRawParameterValue (ParamIDs::reverbWidth)->load();
+            const float mix        = apvts.getRawParameterValue (ParamIDs::reverbMix)->load();
+            const float reverbDuck = apvts.getRawParameterValue (ParamIDs::reverbDuck)->load();
+            const bool  reverse    = apvts.getRawParameterValue (ParamIDs::reverbReverse)->load() > 0.5f;
+
+            reverbProc.setDuckAmount (reverbDuck);
 
             float revLenMs = apvts.getRawParameterValue (ParamIDs::reverbRevLen)->load();
             if (apvts.getRawParameterValue (ParamIDs::reverbRevSync)->load() > 0.5f)
@@ -1672,6 +1696,14 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         suppressorEnableSmoothed.setTargetValue (
             apvts.getRawParameterValue (ParamIDs::suppressorEnabled)->load() > 0.5f ? 1.0f : 0.0f);
         const float suppressAmt = apvts.getRawParameterValue (ParamIDs::suppressorAmt)->load();
+        const bool  suppressFFT = apvts.getRawParameterValue (ParamIDs::suppressorFFT)->load() > 0.5f;
+
+        // Report latency to DAW so it can compensate for FFT mode's delay.
+        const bool  suppressOn  = suppressorEnableSmoothed.getCurrentValue() > 0.5f;
+        const int   latency     = (suppressOn && suppressFFT)
+                                  ? suppressorProc.getLatencySamples (true) : 0;
+        if (getLatencySamples() != latency)
+            setLatencySamples (latency);
         const bool smoothing = suppressorEnableSmoothed.isSmoothing();
         const bool active    = smoothing || suppressorEnableSmoothed.getCurrentValue() > 0.5f;
 
@@ -1683,7 +1715,7 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     fxDryBuffer.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
             }
 
-            suppressorProc.process (buffer, suppressAmt);
+            suppressorProc.process (buffer, suppressAmt, suppressFFT);
 
             if (smoothing)
             {
@@ -1781,6 +1813,19 @@ void PluginProcessor::getStateInformation (juce::MemoryBlock& destData)
     else
         state.removeProperty ("sampleFilePath", nullptr);
 
+    // Store the active bank and preset names so the UI can display them after DAW recall.
+    const auto& bName = presetManager.getCurrentBankName();
+    if (bName.isNotEmpty())
+        state.setProperty ("bankName", bName, nullptr);
+    else
+        state.removeProperty ("bankName", nullptr);
+
+    const auto& pName = presetManager.getCurrentPresetName();
+    if (pName.isNotEmpty())
+        state.setProperty ("presetName", pName, nullptr);
+    else
+        state.removeProperty ("presetName", nullptr);
+
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, destData);
 }
@@ -1819,8 +1864,31 @@ void PluginProcessor::flushAllDspState()
     filterLfo.resetPhase();
     stutterLenLfo.resetPhase();
 
-    // Snap smoothed values to their current targets so old ramps don't bleed through.
+    // Snap all smoothed values so old ramps don't bleed through.
     gateVolumeSmoothed.setCurrentAndTargetValue (1.0f);
+
+    // Snap FX enable crossfades to their new target values instantly — prevents
+    // the old preset's FX tails from playing during a slow enable/disable ramp.
+    auto snapEnable = [&] (juce::SmoothedValue<float>& sv, const juce::String& paramId) {
+        const float target = apvts.getRawParameterValue (paramId)->load() > 0.5f ? 1.0f : 0.0f;
+        sv.setCurrentAndTargetValue (target);
+    };
+    snapEnable (filterEnableSmoothed,      ParamIDs::filterEnabled);
+    snapEnable (distEnableSmoothed,        ParamIDs::distEnabled);
+    snapEnable (flangerEnableSmoothed,     ParamIDs::flangerEnabled);
+    snapEnable (phaserEnableSmoothed,      ParamIDs::phaserEnabled);
+    snapEnable (reverbEnableSmoothed,      ParamIDs::reverbEnabled);
+    snapEnable (delayEnableSmoothed,       ParamIDs::delayEnabled);
+    snapEnable (highcutEnableSmoothed,     ParamIDs::highcutEnabled);
+    snapEnable (lowcutEnableSmoothed,      ParamIDs::lowcutEnabled);
+    snapEnable (clipEnableSmoothed,        ParamIDs::clipEnabled);
+    snapEnable (suppressorEnableSmoothed,  ParamIDs::suppressorEnabled);
+
+    // Snap gain ramps so the old preset's gain doesn't fade into the new one.
+    gainSmoothed.setCurrentAndTargetValue (gainSmoothed.getTargetValue());
+    preGainSmoothed.setCurrentAndTargetValue (preGainSmoothed.getTargetValue());
+    postGainSmoothed.setCurrentAndTargetValue (postGainSmoothed.getTargetValue());
+    normalizeSmoothed.setCurrentAndTargetValue (normalizeSmoothed.getTargetValue());
 }
 
 void PluginProcessor::setStateInformation (const void* data, int sizeInBytes)
@@ -1845,10 +1913,19 @@ void PluginProcessor::setStateInformation (const void* data, int sizeInBytes)
             samplePath = fileNode.getProperty ("path", "").toString();
     }
 
+    // Restore the bank and preset names so the editor can display them after DAW recall.
+    const auto restoredBank = state.getProperty ("bankName", "").toString();
+    if (restoredBank.isNotEmpty())
+        presetManager.setCurrentBankName (restoredBank);
+
+    presetManager.setCurrentPresetName (
+        state.getProperty ("presetName", "").toString());
+
     apvts.replaceState (state);
 
-    // Flush all DSP state so no audio from the previous preset spills over.
-    flushAllDspState();
+    // Request a DSP flush so no audio from the previous preset spills over.
+    // The actual flush runs on the audio thread at the top of processBlock().
+    dspFlushRequested.store (true, std::memory_order_release);
 
     if (samplePath.isNotEmpty())
     {

@@ -55,8 +55,6 @@ void SamplerVoice::prepare (const juce::dsp::ProcessSpec& spec)
     portamentoGlide.reset (spec.sampleRate, 0.0);
     portamentoGlide.setCurrentAndTargetValue (0.0f);
 
-    stealGain.reset (spec.sampleRate, static_cast<double> (kStealFadeSamples) / spec.sampleRate);
-    stealGain.setCurrentAndTargetValue (1.0f);
 
     deClickGain.reset (spec.sampleRate, static_cast<double> (kDeClickSamples) / spec.sampleRate);
     deClickGain.setCurrentAndTargetValue (1.0f);
@@ -188,8 +186,6 @@ void SamplerVoice::startNote (int note, float vel,
     deClickingOut     = false;
     loopXfadeCounter  = 0;
 
-    stealGain.setCurrentAndTargetValue (1.0f);
-
     // Fade in from silence to avoid a click when the sample doesn't start at zero.
     deClickGain.setCurrentAndTargetValue (0.0f);
     deClickGain.setTargetValue (1.0f);
@@ -266,7 +262,6 @@ void SamplerVoice::stealAndRestart (int newMidiNote, float newVelocity,
 
     stealing       = true;
     stealCountdown = kStealFadeSamples;
-    stealGain.setTargetValue (0.0f);
 }
 
 void SamplerVoice::retriggerPitch (int newMidiNote, float newVelocity, const VoiceParams& p)
@@ -327,7 +322,7 @@ float SamplerVoice::computePlaybackRatio (float pitchEnvSample, float pitchLfoSe
     return pitchRatio * srRatio;
 }
 
-float SamplerVoice::readSampleLinear (float pos, int channel) const
+float SamplerVoice::readSampleHermite (float pos, int channel) const
 {
     if (sampleData == nullptr)
         return 0.0f;
@@ -336,15 +331,96 @@ float SamplerVoice::readSampleLinear (float pos, int channel) const
     const int   frames = buf.getNumSamples();
     const int   ch     = juce::jlimit (0, buf.getNumChannels() - 1, channel);
 
-    const int   i0  = static_cast<int> (pos);
-    const int   i1  = i0 + 1;
-    const float frac = pos - static_cast<float> (i0);
+    const int   i1   = static_cast<int> (pos);
+    const float frac = pos - static_cast<float> (i1);
 
-    if (i0 < 0 || i1 >= frames)
-        return 0.0f;
+    if (i1 < 1 || i1 + 2 >= frames)
+    {
+        // Fall back to linear at boundaries where we lack 4 neighbors.
+        const int i0 = i1;
+        const int iN = i0 + 1;
+        if (i0 < 0 || iN >= frames)
+            return 0.0f;
+        const float* data = buf.getReadPointer (ch);
+        return data[i0] + frac * (data[iN] - data[i0]);
+    }
 
     const float* data = buf.getReadPointer (ch);
-    return data[i0] + frac * (data[i1] - data[i0]);
+    const float y0 = data[i1 - 1];
+    const float y1 = data[i1];
+    const float y2 = data[i1 + 1];
+    const float y3 = data[i1 + 2];
+
+    // Hermite 4-point cubic interpolation.
+    const float c0 = y1;
+    const float c1 = 0.5f * (y2 - y0);
+    const float c2 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3;
+    const float c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
+    return ((c3 * frac + c2) * frac + c1) * frac + c0;
+}
+
+float SamplerVoice::readSampleSinc (float pos, int channel) const
+{
+    if (sampleData == nullptr)
+        return 0.0f;
+
+    const auto& buf    = sampleData->buffer;
+    const int   frames = buf.getNumSamples();
+    const int   ch     = juce::jlimit (0, buf.getNumChannels() - 1, channel);
+
+    const int   iCenter = static_cast<int> (pos);
+    const float frac    = pos - static_cast<float> (iCenter);
+
+    // 8-point windowed sinc: 4 taps each side of the fractional position.
+    static constexpr int kHalfTaps = 4;
+    const int firstTap = iCenter - kHalfTaps + 1;
+    const int lastTap  = iCenter + kHalfTaps;
+
+    if (firstTap < 0 || lastTap >= frames)
+        return readSampleHermite (pos, channel);
+
+    const float* data = buf.getReadPointer (ch);
+    float result = 0.0f;
+
+    for (int t = firstTap; t <= lastTap; ++t)
+    {
+        const float d = frac + static_cast<float> (iCenter - t);
+        float sincVal;
+
+        if (std::abs (d) < 1.0e-6f)
+        {
+            sincVal = 1.0f;
+        }
+        else
+        {
+            // Normalized sinc: sin(pi*d) / (pi*d)
+            const float pid = juce::MathConstants<float>::pi * d;
+            sincVal = std::sin (pid) / pid;
+
+            // Blackman-Harris window over the kernel span.
+            const float n = d + static_cast<float> (kHalfTaps);
+            const float nNorm = n / static_cast<float> (2 * kHalfTaps);
+            const float twoPiN  = juce::MathConstants<float>::twoPi * nNorm;
+            const float fourPiN = 2.0f * twoPiN;
+            const float sixPiN  = 3.0f * twoPiN;
+            const float window  = 0.35875f
+                                - 0.48829f * std::cos (twoPiN)
+                                + 0.14128f * std::cos (fourPiN)
+                                - 0.01168f * std::cos (sixPiN);
+            sincVal *= window;
+        }
+
+        result += data[t] * sincVal;
+    }
+
+    return result;
+}
+
+float SamplerVoice::readSample (float pos, int channel) const
+{
+    if (params.hqInterpolation)
+        return readSampleSinc (pos, channel);
+    return readSampleHermite (pos, channel);
 }
 
 void SamplerVoice::handleLoopBoundary()
@@ -463,7 +539,14 @@ void SamplerVoice::renderSamples (juce::AudioBuffer<float>& outputBuffer,
         const float ratio          = computePlaybackRatio (pitchEnvSample, pitchLfoSemi);
 
         const float volEnvGain  = volumeEnv.getNextSample();
-        const float stealFactor = stealing ? stealGain.getNextValue() : 1.0f;
+        float stealFactor = 1.0f;
+        if (stealing)
+        {
+            // Smoothstep fade-out: equal-power curve keeps perceived loudness
+            // constant through the crossfade, reducing clicks during rapid retrigger.
+            const float t = static_cast<float> (stealCountdown) / static_cast<float> (kStealFadeSamples);
+            stealFactor = t * t * (3.0f - 2.0f * t);
+        }
         const float deClick     = deClickGain.getNextValue();
         const float gain        = velocity * volEnvGain * stealFactor * deClick;
 
@@ -475,7 +558,6 @@ void SamplerVoice::renderSamples (juce::AudioBuffer<float>& outputBuffer,
             {
                 stealing = false;
                 startNote (pendingMidiNote, pendingVelocity, std::move (pendingSample), pendingParams);
-                stealGain.setCurrentAndTargetValue (1.0f);
             }
         }
 
@@ -496,11 +578,11 @@ void SamplerVoice::renderSamples (juce::AudioBuffer<float>& outputBuffer,
         {
             const int srcCh  = (numSrcChannels > 1) ? ch : 0;
             const int offset = (ch < kMaxChannels) ? chReadOffset[ch] : 0;
-            float out = readSampleLinear (static_cast<float> (readPos) + offset, srcCh);
+            float out = readSample (static_cast<float> (readPos) + offset, srcCh);
 
             if (xfading)
             {
-                const float shadow = readSampleLinear (static_cast<float> (loopXfadePos) + offset, srcCh);
+                const float shadow = readSample (static_cast<float> (loopXfadePos) + offset, srcCh);
                 out = out * xfadeIn + shadow * (1.0f - xfadeIn);
             }
 

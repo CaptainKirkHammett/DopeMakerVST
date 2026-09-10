@@ -138,6 +138,9 @@ void GranulizerProcessor::process (juce::AudioBuffer<float>& buffer,
     {
         grainOffsetSeconds.store (-1.0f, std::memory_order_relaxed);
     }
+
+    // Expose the current LFO value for the UI mod indicator.
+    lfoOutput.store (std::sin (lfoPhase), std::memory_order_relaxed);
 }
 
 void GranulizerProcessor::spawnGrain (float effectiveWaveSpacing, float panAmt,

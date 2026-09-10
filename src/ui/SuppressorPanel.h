@@ -14,6 +14,9 @@ private:
     juce::ToggleButton enableButton { "AutoEQ" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> enableAttach;
 
+    juce::ToggleButton fftButton { "FFT" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> fftAttach;
+
     juce::Slider amtSlider;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> amtAttach;
 };

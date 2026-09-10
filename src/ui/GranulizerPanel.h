@@ -2,6 +2,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
+#include "LfoModIndicator.h"
 
 // FL-Studio-inspired granulizer control bar.
 // Spans roughly half the plugin width; contains an on/off toggle followed by eight
@@ -11,6 +12,10 @@ class GranulizerPanel : public juce::Component
 {
 public:
     explicit GranulizerPanel (juce::AudioProcessorValueTreeState& apvts);
+
+    void setModSources (std::atomic<float>* lfoOutput,
+                        std::atomic<float>* depthBase,
+                        std::atomic<float>* waveSpacingBase);
 
     void paint   (juce::Graphics&) override;
     void resized () override;
@@ -50,4 +55,6 @@ private:
     juce::Label  randLabel    { {}, "Rand"    };
     juce::Slider randSlider;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> randAttach;
+
+    LfoModIndicator lfoModIndicator;
 };

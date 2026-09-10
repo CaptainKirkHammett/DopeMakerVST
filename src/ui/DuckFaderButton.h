@@ -8,6 +8,7 @@
 // fully bright at 1.0 (maximum), using the same disabled/enabled purple
 // tints as the standard toggle buttons.  Vertical drag sets the value.
 class DuckFaderButton : public juce::Component,
+                        public juce::SettableTooltipClient,
                         private juce::Slider::Listener
 {
 public:

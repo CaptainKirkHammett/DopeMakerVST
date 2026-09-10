@@ -65,6 +65,10 @@ private:
     juce::ToggleButton slicerButton { "Slicer" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> slicerAttach;
 
+    // Slice1 button — random slice mode: only the Slice Start key triggers, plays a random slice.
+    juce::ToggleButton slicerRandomButton { "Slice1" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> slicerRandomAttach;
+
     // ── Pitch LFO ─────────────────────────────────────────────────────────────
     juce::Label    pitchLfoTitle    { {}, "Pitch LFO" };
 

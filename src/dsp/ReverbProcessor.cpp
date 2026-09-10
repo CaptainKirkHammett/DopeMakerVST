@@ -20,6 +20,12 @@ void ReverbProcessor::prepare (const juce::dsp::ProcessSpec& spec)
         seg.outputReady = false;
     }
     activeCapture = 0;
+
+    // Duck envelope: fast attack so reverb ducks quickly when input arrives,
+    // slow release so it fades back in gracefully when input stops.
+    duckAttackCoeff  = 1.0f - std::exp (-1.0f / static_cast<float> (spec.sampleRate * 0.015));
+    duckReleaseCoeff = 1.0f - std::exp (-1.0f / static_cast<float> (spec.sampleRate * 0.250));
+    duckEnvLevel     = 0.0f;
 }
 
 void ReverbProcessor::reset()
@@ -36,6 +42,7 @@ void ReverbProcessor::reset()
         seg.outputReady = false;
     }
     activeCapture = 0;
+    duckEnvLevel  = 0.0f;
 }
 
 void ReverbProcessor::setParameters (float roomSize, float damping, float width, float mix,
@@ -72,6 +79,17 @@ void ReverbProcessor::setParameters (float roomSize, float damping, float width,
     revParams.freezeMode = 0.0f;
     for (auto& seg : segments)
         seg.reverb.setParameters (revParams);
+}
+
+void ReverbProcessor::setDuckAmount (float zeroToOne)
+{
+    duckAmount = juce::jlimit (0.0f, 1.0f, zeroToOne);
+    duckLfoDepth.store (duckAmount, std::memory_order_relaxed);
+    if (duckAmount <= 0.0f)
+    {
+        duckEnvLevel = 0.0f;
+        duckLfoOutput.store (0.0f, std::memory_order_relaxed);
+    }
 }
 
 void ReverbProcessor::processSegment (Segment& seg)
@@ -125,18 +143,54 @@ void ReverbProcessor::processSegment (Segment& seg)
 
 void ReverbProcessor::process (juce::dsp::ProcessContextReplacing<float>& context)
 {
-    if (!reverseEnabled)
-    {
-        reverb.process (context);
-        return;
-    }
-
     auto& block      = context.getOutputBlock();
     const int numSamples = static_cast<int> (block.getNumSamples());
     const int numCh      = static_cast<int> (block.getNumChannels());
 
+    // Duck envelope — measure block peak from the input signal before reverb processes it.
+    float duckReduction = 0.0f;
+    if (duckAmount > 0.0f)
+    {
+        float blockPeak = 0.0f;
+        for (int ch = 0; ch < numCh; ++ch)
+        {
+            const auto* chData = block.getChannelPointer (ch);
+            for (int s = 0; s < numSamples; ++s)
+                blockPeak = juce::jmax (blockPeak, std::abs (chData[s]));
+        }
+
+        const float coeff = (blockPeak > duckEnvLevel) ? duckAttackCoeff : duckReleaseCoeff;
+        const float decayN = std::pow (1.0f - coeff, static_cast<float> (numSamples));
+        duckEnvLevel = blockPeak - (blockPeak - duckEnvLevel) * decayN;
+        duckEnvLevel = juce::jlimit (0.0f, 1.0f, duckEnvLevel);
+
+        duckReduction = duckEnvLevel * duckAmount;
+        duckLfoOutput.store (-duckEnvLevel, std::memory_order_relaxed);
+    }
+
+    if (!reverseEnabled)
+    {
+        // Forward reverb: duck modulates the wet/dry mix.
+        const float duckedMix = juce::jlimit (0.0f, 1.0f, currentMix - duckReduction);
+
+        juce::dsp::Reverb::Parameters params;
+        params.roomSize   = currentRoomSize;
+        params.damping    = currentDamping;
+        params.width      = currentWidth;
+        params.wetLevel   = duckedMix;
+        params.dryLevel   = 1.0f - duckedMix;
+        params.freezeMode = 0.0f;
+        reverb.setParameters (params);
+
+        reverb.process (context);
+        return;
+    }
+
+    // Reverse reverb path — duck reduces the wet mix per sample.
     auto& capSeg  = segments[activeCapture];
     auto& playSeg = segments[1 - activeCapture];
+
+    const float duckedMix = juce::jlimit (0.0f, 1.0f, currentMix - duckReduction);
 
     for (int s = 0; s < numSamples; ++s)
     {
@@ -160,8 +214,8 @@ void ReverbProcessor::process (juce::dsp::ProcessContextReplacing<float>& contex
         }
 
         // Mix output from the playback segment.
-        const float dry = 1.0f - currentMix;
-        const float wet = currentMix;
+        const float dry = 1.0f - duckedMix;
+        const float wet = duckedMix;
 
         float wetSample[2] = { 0.0f, 0.0f };
 

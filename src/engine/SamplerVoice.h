@@ -27,6 +27,7 @@ struct VoiceParams
                                       // (may differ from startPos/endPos due to LFO).
                                       // Negative means "use startPos / endPos as before".
     bool  perChannelZC    { false };  // true = independent ZC per channel; false = shared earliest ZC
+    bool  hqInterpolation { false };  // true = 8-point windowed sinc; false = Hermite cubic
     bool  reversed        { false };  // play end→start
     bool  randomDir       { false };  // true = direction randomised per note in engine
     bool  looping         { false };
@@ -123,7 +124,9 @@ private:
 
     float computePlaybackRatio (float pitchEnvSample, float pitchLfoSemi) const;
     void  advanceReadPosition (float ratio);
-    float readSampleLinear (float position, int channel) const;
+    float readSampleHermite (float position, int channel) const;
+    float readSampleSinc (float position, int channel) const;
+    float readSample (float position, int channel) const;
     void  handleLoopBoundary();
 
     // State
@@ -150,7 +153,7 @@ private:
     // Steal-fade state
     bool  stealing    { false };
     int   stealCountdown { 0 };
-    static constexpr int kStealFadeSamples { 64 };
+    static constexpr int kStealFadeSamples { 128 };
     // Pending retrigger after steal fade
     int              pendingMidiNote { 60 };
     float            pendingVelocity { 1.0f };
@@ -159,8 +162,6 @@ private:
 
     juce::SmoothedValue<float> pitchBendSmoothed;
     juce::SmoothedValue<float> portamentoGlide;   // smoothed (midiNote - rootNote) in semitones
-    juce::SmoothedValue<float> stealGain;
-
     // De-click envelope: fades in at note start and out at note end to eliminate
     // boundary clicks when the sample doesn't start/end at zero.
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> deClickGain;

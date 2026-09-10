@@ -1,12 +1,19 @@
 #include "PresetManager.h"
 
-const juce::String PresetManager::kDefaultBank    = "Default Bank";
+const juce::String PresetManager::kDefaultBank    = "Fvcktory Bank";
 const juce::String PresetManager::kPresetExtension = ".dmpreset";
 const juce::String PresetManager::kSamplesFolder   = "Samples";
 
 PresetManager::PresetManager (juce::AudioProcessorValueTreeState& a)
-    : apvts (a)
+    : apvts (a),
+      currentBankName (kDefaultBank)
 {
+    // Migrate legacy "Default Bank" folder to the new name.
+    auto legacyDir = getPresetsRoot().getChildFile ("Default Bank");
+    auto newDir    = getPresetsRoot().getChildFile (kDefaultBank);
+    if (legacyDir.isDirectory() && ! newDir.exists())
+        legacyDir.moveFileTo (newDir);
+
     getBankDirectory().createDirectory();
     getSamplesDirectory().createDirectory();
 }
@@ -18,9 +25,71 @@ juce::File PresetManager::getPresetsRoot()
                .getChildFile ("Presets");
 }
 
+//==============================================================================
+// Bank management
+//==============================================================================
+
+juce::StringArray PresetManager::getBankNames() const
+{
+    juce::StringArray names;
+    for (auto& d : getPresetsRoot().findChildFiles (
+             juce::File::findDirectories, false))
+    {
+        // Skip the Samples subfolder if it somehow sits at root level.
+        if (d.getFileName().equalsIgnoreCase (kSamplesFolder))
+            continue;
+        names.add (d.getFileName());
+    }
+    names.sort (true);
+    return names;
+}
+
+void PresetManager::setCurrentBank (const juce::String& bankName)
+{
+    currentBankName   = bankName;
+    currentPresetName = {};
+    getBankDirectory().createDirectory();
+    getSamplesDirectory().createDirectory();
+}
+
+bool PresetManager::createBank (const juce::String& bankName)
+{
+    const auto safe = sanitizeFileName (bankName);
+    if (safe.isEmpty())
+        return false;
+
+    auto dir = getPresetsRoot().getChildFile (safe);
+    if (dir.isDirectory())
+        return false; // already exists
+
+    if (! dir.createDirectory())
+        return false;
+
+    dir.getChildFile (kSamplesFolder).createDirectory();
+    return true;
+}
+
+bool PresetManager::deleteBank (const juce::String& bankName)
+{
+    // Never delete the factory bank.
+    if (bankName == kDefaultBank)
+        return false;
+
+    auto dir = getPresetsRoot().getChildFile (bankName);
+    if (! dir.isDirectory())
+        return false;
+
+    const bool ok = dir.deleteRecursively();
+    if (ok && currentBankName == bankName)
+        setCurrentBank (kDefaultBank);
+    return ok;
+}
+
+//==============================================================================
+
 juce::File PresetManager::getBankDirectory() const
 {
-    return getPresetsRoot().getChildFile (kDefaultBank);
+    return getPresetsRoot().getChildFile (currentBankName);
 }
 
 juce::File PresetManager::getSamplesDirectory() const
@@ -34,8 +103,6 @@ juce::StringArray PresetManager::getPresetNames() const
     for (auto& f : getBankDirectory().findChildFiles (
              juce::File::findFiles, false, "*" + kPresetExtension))
     {
-        // Read the display name stored inside the file; fall back to the
-        // filename for presets saved before this attribute was added.
         juce::String displayName = f.getFileNameWithoutExtension();
         if (auto xml = juce::XmlDocument::parse (f))
             if (xml->hasAttribute ("name"))
@@ -69,7 +136,7 @@ bool PresetManager::savePreset (const juce::String& presetName, const juce::File
 
     juce::XmlElement root ("DopeMakerPreset");
     root.setAttribute ("version", 1);
-    root.setAttribute ("name", presetName);   // preserve original name (may contain chars sanitized in filename)
+    root.setAttribute ("name", presetName);
 
     if (relSamplePath.isNotEmpty())
     {
@@ -133,7 +200,6 @@ juce::File PresetManager::getPresetFile (const juce::String& presetName) const
 
 juce::String PresetManager::sanitizeFileName (const juce::String& name)
 {
-    // Replace characters that are illegal in file names on any OS.
     juce::String safe;
     for (auto ch : name)
     {
