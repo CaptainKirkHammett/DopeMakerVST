@@ -443,7 +443,7 @@ void PluginEditor::resized()
     logoButton.setBounds  (header.reduced (4));
     // "Contact" at the same vertical position and font size as betaLabel, right-aligned next to logo.
     contactLabel.setBounds (logoButton.getRight() - 80, betaLabel.getY(), 75, 18);
-    donateLabel.setBounds (contactLabel.getRight() + 5, betaLabel.getY(), 75, 18);
+    donateLabel.setBounds (contactLabel.getRight() - 10, betaLabel.getY(), 55, 18);
 
     // ── Waveform strip ────────────────────────────────────────────────────────
     auto waveRow = area.removeFromTop (120);
