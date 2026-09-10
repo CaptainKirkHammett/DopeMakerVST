@@ -60,6 +60,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     betaLabel.setJustificationType (juce::Justification::topLeft);
     uiRoot.addAndMakeVisible (betaLabel);
 
+    logoButton.addMouseListener (this, false);
     uiRoot.addAndMakeVisible (logoButton);
 
     contactLabel.setText ("Contact", juce::dontSendNotification);
@@ -380,11 +381,17 @@ void PluginEditor::mouseUp (const juce::MouseEvent& e)
     }
     else if (e.eventComponent == &titleLabel)
     {
-        juce::URL ("https://dope.town/").launchInDefaultBrowser();
+        signalPathOverlay.setBounds (uiRoot.getLocalBounds());
+        signalPathOverlay.setVisible (true);
+        signalPathOverlay.toFront (true);
     }
     else if (e.eventComponent == &donateLabel)
     {
         juce::URL ("https://paypal.me/captainkirna").launchInDefaultBrowser();
+    }
+    else if (e.eventComponent == &logoButton)
+    {
+        juce::URL ("https://dope.town/").launchInDefaultBrowser();
     }
 }
 
