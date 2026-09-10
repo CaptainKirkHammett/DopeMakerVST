@@ -65,7 +65,7 @@ struct CoverArtComponent : public juce::Component
 
     void mouseUp (const juce::MouseEvent&) override
     {
-        juce::URL ("https://msha.ke/dopescience").launchInDefaultBrowser();
+        juce::URL ("https://dope.town/").launchInDefaultBrowser();
     }
 
 private:
