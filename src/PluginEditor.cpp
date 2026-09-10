@@ -70,6 +70,14 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     contactLabel.addMouseListener (this, false);
     uiRoot.addAndMakeVisible (contactLabel);
 
+    donateLabel.setText ("Donate", juce::dontSendNotification);
+    donateLabel.setFont (juce::Font (16.0f, juce::Font::italic));
+    donateLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff).withAlpha (0.7f));
+    donateLabel.setJustificationType (juce::Justification::centredRight);
+    donateLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    donateLabel.addMouseListener (this, false);
+    uiRoot.addAndMakeVisible (donateLabel);
+
     bqButton.getProperties().set ("fxButton", true);
     bqButton.setTooltip ("Better Quality Interpolation\n\n"
                          "OFF  Good Quality (Hermite cubic): smooth 4-point interpolation that works well "
@@ -374,6 +382,10 @@ void PluginEditor::mouseUp (const juce::MouseEvent& e)
     {
         juce::URL ("https://dope.town/").launchInDefaultBrowser();
     }
+    else if (e.eventComponent == &donateLabel)
+    {
+        juce::URL ("https://paypal.me/captainkirna").launchInDefaultBrowser();
+    }
 }
 
 void PluginEditor::paint (juce::Graphics& g)
@@ -431,6 +443,7 @@ void PluginEditor::resized()
     logoButton.setBounds  (header.reduced (4));
     // "Contact" at the same vertical position and font size as betaLabel, right-aligned next to logo.
     contactLabel.setBounds (logoButton.getRight() - 80, betaLabel.getY(), 75, 18);
+    donateLabel.setBounds (contactLabel.getRight() + 5, betaLabel.getY(), 75, 18);
 
     // ── Waveform strip ────────────────────────────────────────────────────────
     auto waveRow = area.removeFromTop (120);

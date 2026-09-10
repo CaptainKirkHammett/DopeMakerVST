@@ -244,6 +244,7 @@ private:
     juce::Label        betaLabel;
     LogoButton         logoButton;
     juce::Label        contactLabel;
+    juce::Label        donateLabel;
     juce::ToggleButton bqButton          { "BQ" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bqAttach;
     juce::ToggleButton zcButton          { "ZC" };
