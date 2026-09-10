@@ -51,6 +51,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     titleLabel.setFont (juce::Font (93.31f, juce::Font::bold));  // 15 % smaller than original 109.78 f
     titleLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff));
     titleLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    titleLabel.setTooltip ("Signal chain map");
     titleLabel.addMouseListener (this, false);
     uiRoot.addAndMakeVisible (titleLabel);
 
@@ -60,6 +61,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     betaLabel.setJustificationType (juce::Justification::topLeft);
     uiRoot.addAndMakeVisible (betaLabel);
 
+    logoButton.setTooltip ("Enter The DOPE TOWN");
     logoButton.addMouseListener (this, false);
     uiRoot.addAndMakeVisible (logoButton);
 
@@ -68,6 +70,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     contactLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff).withAlpha (0.7f));
     contactLabel.setJustificationType (juce::Justification::centredRight);
     contactLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    contactLabel.setTooltip ("Send EMail");
     contactLabel.addMouseListener (this, false);
     uiRoot.addAndMakeVisible (contactLabel);
 
@@ -76,6 +79,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     donateLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff).withAlpha (0.7f));
     donateLabel.setJustificationType (juce::Justification::centredRight);
     donateLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    donateLabel.setTooltip ("If you find this VST fun, you could always Paypal me few bucks RIGHT!?");
     donateLabel.addMouseListener (this, false);
     uiRoot.addAndMakeVisible (donateLabel);
 

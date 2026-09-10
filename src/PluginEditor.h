@@ -123,7 +123,7 @@ private:
 };
 
 // Displays DOPE.png scaled to fit and opens the Bandcamp page on click.
-struct LogoButton : public juce::Component
+struct LogoButton : public juce::Component, public juce::SettableTooltipClient
 {
     LogoButton()
     {
