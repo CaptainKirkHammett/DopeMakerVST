@@ -11,7 +11,7 @@
 ;   - Factory sample WAVs      -> %APPDATA%\DopeMakerVST\Presets\Fvcktory Bank\Samples\
 
 #define MyAppName      "Dope Maker"
-#define MyAppVersion   "0.2780.0.2"
+#define MyAppVersion   "0.2780.0.3"
 #define MyAppPublisher "Dope Science"
 #define MyAppURL       ""
 
@@ -83,8 +83,8 @@ Type: filesandordirs; Name: "{commonpf}\VST3\Dope Maker.vst3"
 const
   GENERIC_WRITE = $40000000;
   OPEN_EXISTING = 3;
-  FILE_ATTRIBUTE_NORMAL = $80;
-  INVALID_HANDLE_VALUE = $FFFFFFFF;
+  FILE_ATTR_NORMAL = $80;
+  INVALID_HANDLE_VALUE_ = $FFFFFFFF;
 
 function CreateFileA(
   lpFileName: AnsiString;
@@ -106,8 +106,8 @@ begin
   PluginPath := ExpandConstant('{commonpf}\VST3\Dope Maker.vst3\Contents\x86_64-win\Dope Maker.vst3');
   if FileExists(PluginPath) then
   begin
-    FileHandle := CreateFileA(PluginPath, GENERIC_WRITE, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
-    if FileHandle = INVALID_HANDLE_VALUE then
+    FileHandle := CreateFileA(PluginPath, GENERIC_WRITE, 0, 0, OPEN_EXISTING, FILE_ATTR_NORMAL, 0);
+    if FileHandle = INVALID_HANDLE_VALUE_ then
       Result := True
     else
       CloseHandle(FileHandle);
@@ -122,7 +122,7 @@ var
   ResultCode: Integer;
 begin
   Result := True;
-  UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#SetupSetting("AppId")}_is1';
+  UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{E7A3F2D1-4B8C-4D2E-9F1A-6C5B3D7E8F90}_is1';
 
   // Check if the plugin is currently loaded in a DAW
   if IsPluginFileLocked() then
