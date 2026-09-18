@@ -80,20 +80,82 @@ WelcomeLabel2=This will install [name/ver] on your computer.%n%nThe VST3 plugin 
 Type: filesandordirs; Name: "{commonpf}\VST3\Dope Maker.vst3"
 
 [Code]
+const
+  GENERIC_WRITE = $40000000;
+  OPEN_EXISTING = 3;
+  FILE_ATTRIBUTE_NORMAL = $80;
+  INVALID_HANDLE_VALUE = $FFFFFFFF;
+
+function CreateFileA(
+  lpFileName: AnsiString;
+  dwDesiredAccess, dwShareMode: Cardinal;
+  lpSecurityAttributes: Cardinal;
+  dwCreationDisposition, dwFlagsAndAttributes: Cardinal;
+  hTemplateFile: Cardinal): Cardinal;
+  external 'CreateFileA@kernel32.dll stdcall';
+
+function CloseHandle(hObject: Cardinal): Boolean;
+  external 'CloseHandle@kernel32.dll stdcall';
+
+function IsPluginFileLocked(): Boolean;
+var
+  PluginPath: String;
+  FileHandle: Cardinal;
+begin
+  Result := False;
+  PluginPath := ExpandConstant('{commonpf}\VST3\Dope Maker.vst3\Contents\x86_64-win\Dope Maker.vst3');
+  if FileExists(PluginPath) then
+  begin
+    FileHandle := CreateFileA(PluginPath, GENERIC_WRITE, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+    if FileHandle = INVALID_HANDLE_VALUE then
+      Result := True
+    else
+      CloseHandle(FileHandle);
+  end;
+end;
+
 function InitializeSetup(): Boolean;
 var
   UninstallKey: String;
   UninstallCmd: String;
+  InstalledVersion: String;
   ResultCode: Integer;
 begin
   Result := True;
   UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#SetupSetting("AppId")}_is1';
 
+  // Check if the plugin is currently loaded in a DAW
+  if IsPluginFileLocked() then
+  begin
+    MsgBox(
+      'Dope Maker is currently in use by another application (likely a DAW).' + #13#10 + #13#10 +
+      'Please close your DAW or remove the plugin from your session before installing.',
+      mbError, MB_OK);
+    Result := False;
+    Exit;
+  end;
+
   // Check if a previous version is installed
   if RegQueryStringValue(HKLM, UninstallKey, 'UninstallString', UninstallCmd) then
   begin
+    // Check if the installed version is the same
+    if RegQueryStringValue(HKLM, UninstallKey, 'DisplayVersion', InstalledVersion) then
+    begin
+      if InstalledVersion = '{#MyAppVersion}' then
+      begin
+        if MsgBox(
+          'Dope Maker v{#MyAppVersion} is already installed.' + #13#10 + #13#10 +
+          'Do you want to reinstall the same version?',
+          mbConfirmation, MB_YESNO) = IDNO then
+        begin
+          Result := False;
+          Exit;
+        end;
+      end;
+    end;
+
     if MsgBox(
-      'A previous version of Dope Maker was detected.' + #13#10 + #13#10 +
+      'A previous version of Dope Maker (v' + InstalledVersion + ') was detected.' + #13#10 + #13#10 +
       'It will be uninstalled before continuing. Proceed?',
       mbConfirmation, MB_YESNO) = IDYES then
     begin
