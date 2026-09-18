@@ -25,7 +25,7 @@ AppId={{E7A3F2D1-4B8C-4D2E-9F1A-6C5B3D7E8F90}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={commonpf}\VST3
+DefaultDirName={commoncf}\VST3
 DirExistsWarning=no
 DisableProgramGroupPage=yes
 OutputDir={#ProjectRoot}\installer\output
@@ -55,8 +55,8 @@ Name: "samples"; Description: "Factory Sample Sounds (~42 MB)"; Types: full
 
 [Files]
 ; VST3 bundle — preserves the folder structure
-Source: "{#VST3Source}\Contents\Resources\moduleinfo.json"; DestDir: "{commonpf}\VST3\Dope Maker.vst3\Contents\Resources"; Components: plugin; Flags: ignoreversion
-Source: "{#VST3Source}\Contents\x86_64-win\Dope Maker.vst3"; DestDir: "{commonpf}\VST3\Dope Maker.vst3\Contents\x86_64-win"; Components: plugin; Flags: ignoreversion
+Source: "{#VST3Source}\Contents\Resources\moduleinfo.json"; DestDir: "{commoncf}\VST3\Dope Maker.vst3\Contents\Resources"; Components: plugin; Flags: ignoreversion
+Source: "{#VST3Source}\Contents\x86_64-win\Dope Maker.vst3"; DestDir: "{commoncf}\VST3\Dope Maker.vst3\Contents\x86_64-win"; Components: plugin; Flags: ignoreversion
 
 ; Factory samples — into the default preset bank's Samples folder
 Source: "{#SamplesSource}\*.wav"; DestDir: "{userappdata}\DopeMakerVST\Presets\Fvcktory Bank\Samples"; Components: samples; Flags: ignoreversion onlyifdoesntexist
@@ -70,14 +70,14 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
 [UninstallDelete]
 ; Clean up the VST3 bundle folder on uninstall
-Type: filesandordirs; Name: "{commonpf}\VST3\Dope Maker.vst3"
+Type: filesandordirs; Name: "{commoncf}\VST3\Dope Maker.vst3"
 
 [Messages]
 WelcomeLabel2=This will install [name/ver] on your computer.%n%nThe VST3 plugin will be placed in:%n  C:\Program Files\Common Files\VST3\Dope Maker.vst3\%n%nFactory samples will be placed in:%n  %APPDATA%\DopeMakerVST\Presets\Fvcktory Bank\Samples\
 
 [InstallDelete]
 ; Remove the old VST3 bundle before installing to prevent stale leftover files
-Type: filesandordirs; Name: "{commonpf}\VST3\Dope Maker.vst3"
+Type: filesandordirs; Name: "{commoncf}\VST3\Dope Maker.vst3"
 
 [Code]
 const
@@ -103,7 +103,7 @@ var
   FileHandle: Cardinal;
 begin
   Result := False;
-  PluginPath := ExpandConstant('{commonpf}\VST3\Dope Maker.vst3\Contents\x86_64-win\Dope Maker.vst3');
+  PluginPath := ExpandConstant('{commoncf}\VST3\Dope Maker.vst3\Contents\x86_64-win\Dope Maker.vst3');
   if FileExists(PluginPath) then
   begin
     FileHandle := CreateFileA(PluginPath, GENERIC_WRITE, 0, 0, OPEN_EXISTING, FILE_ATTR_NORMAL, 0);
@@ -119,10 +119,13 @@ var
   UninstallKey: String;
   UninstallCmd: String;
   InstalledVersion: String;
+  PluginPath: String;
   ResultCode: Integer;
+  FoundInRegistry: Boolean;
 begin
   Result := True;
   UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{E7A3F2D1-4B8C-4D2E-9F1A-6C5B3D7E8F90}_is1';
+  PluginPath := ExpandConstant('{commoncf}\VST3\Dope Maker.vst3\Contents\x86_64-win\Dope Maker.vst3');
 
   // Check if the plugin is currently loaded in a DAW
   if IsPluginFileLocked() then
@@ -135,8 +138,10 @@ begin
     Exit;
   end;
 
-  // Check if a previous version is installed
-  if RegQueryStringValue(HKLM, UninstallKey, 'UninstallString', UninstallCmd) then
+  // Check registry for a previous Inno Setup install
+  FoundInRegistry := RegQueryStringValue(HKLM, UninstallKey, 'UninstallString', UninstallCmd);
+
+  if FoundInRegistry then
   begin
     // Check if the installed version is the same
     if RegQueryStringValue(HKLM, UninstallKey, 'DisplayVersion', InstalledVersion) then
@@ -159,10 +164,21 @@ begin
       'It will be uninstalled before continuing. Proceed?',
       mbConfirmation, MB_YESNO) = IDYES then
     begin
-      // Run the old uninstaller silently
       Exec(RemoveQuotes(UninstallCmd), '/SILENT /NORESTART', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     end
     else
+    begin
+      Result := False;
+    end;
+  end
+  else if FileExists(PluginPath) then
+  begin
+    // Plugin exists on disk but was not installed via this installer (manual copy)
+    if MsgBox(
+      'An existing Dope Maker plugin was found at:' + #13#10 +
+      '  ' + PluginPath + #13#10 + #13#10 +
+      'It will be replaced with v{#MyAppVersion}. Proceed?',
+      mbConfirmation, MB_YESNO) = IDNO then
     begin
       Result := False;
     end;
@@ -177,7 +193,7 @@ begin
     MsgBox(
       'Dope Maker has been installed successfully!' + #13#10 + #13#10 +
       'VST3 plugin location:' + #13#10 +
-      '  ' + ExpandConstant('{commonpf}\VST3\Dope Maker.vst3') + #13#10 + #13#10 +
+      '  ' + ExpandConstant('{commoncf}\VST3\Dope Maker.vst3') + #13#10 + #13#10 +
       'Rescan your VST3 plugins in your DAW to load Dope Maker.',
       mbInformation, MB_OK);
   end;
