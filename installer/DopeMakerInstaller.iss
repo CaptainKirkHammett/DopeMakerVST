@@ -59,7 +59,8 @@ Source: "{#VST3Source}\Contents\Resources\moduleinfo.json"; DestDir: "{commoncf}
 Source: "{#VST3Source}\Contents\x86_64-win\Dope Maker.vst3"; DestDir: "{commoncf}\VST3\Dope Maker.vst3\Contents\x86_64-win"; Components: plugin; Flags: ignoreversion
 
 ; Factory samples — into the default preset bank's Samples folder
-Source: "{#SamplesSource}\*.wav"; DestDir: "{userappdata}\DopeMakerVST\Presets\Fvcktory Bank\Samples"; Components: samples; Flags: ignoreversion onlyifdoesntexist
+; onlyifdoesntexist is toggled off at runtime when user chooses to overwrite
+Source: "{#SamplesSource}\*.wav"; DestDir: "{userappdata}\DopeMakerVST\Presets\Fvcktory Bank\Samples"; Components: samples; Flags: ignoreversion; Check: ShouldInstallSample
 
 [Dirs]
 ; Ensure the preset structure exists even if no samples are installed
@@ -80,6 +81,9 @@ WelcomeLabel2=This will install [name/ver] on your computer.%n%nThe VST3 plugin 
 Type: filesandordirs; Name: "{commoncf}\VST3\Dope Maker.vst3"
 
 [Code]
+var
+  OverwriteSamples: Boolean;
+
 const
   GENERIC_WRITE = $40000000;
   OPEN_EXISTING = 3;
@@ -111,6 +115,19 @@ begin
       Result := True
     else
       CloseHandle(FileHandle);
+  end;
+end;
+
+function ShouldInstallSample(): Boolean;
+var
+  DestPath: String;
+begin
+  if OverwriteSamples then
+    Result := True
+  else
+  begin
+    DestPath := ExpandConstant('{userappdata}\DopeMakerVST\Presets\Fvcktory Bank\Samples\') + ExtractFileName(CurrentFileName);
+    Result := not FileExists(DestPath);
   end;
 end;
 
@@ -181,6 +198,22 @@ begin
       mbConfirmation, MB_YESNO) = IDNO then
     begin
       Result := False;
+      Exit;
+    end;
+  end;
+
+  // Check if existing presets or samples are present
+  OverwriteSamples := False;
+  if DirExists(ExpandConstant('{userappdata}\DopeMakerVST\Presets\Fvcktory Bank')) then
+  begin
+    if MsgBox(
+      'Existing presets and samples were found in the Fvcktory Bank.' + #13#10 + #13#10 +
+      'Do you want to overwrite them with the factory defaults?' + #13#10 + #13#10 +
+      'Yes = overwrite existing files' + #13#10 +
+      'No = keep your current files, only add missing ones',
+      mbConfirmation, MB_YESNO) = IDYES then
+    begin
+      OverwriteSamples := True;
     end;
   end;
 end;
