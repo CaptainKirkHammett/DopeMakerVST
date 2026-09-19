@@ -47,14 +47,13 @@ DisableDirPage=yes
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Types]
-Name: "full";    Description: "Full installation (plugin + factory samples)"
-Name: "compact"; Description: "Plugin only (no factory samples)"
+Name: "full";    Description: "Full installation (plugin + factory presets & samples)"
+Name: "compact"; Description: "Plugin only (no factory content)"
 Name: "custom";  Description: "Custom installation"; Flags: iscustom
 
 [Components]
-Name: "plugin";  Description: "Dope Maker VST3 Plugin";  Types: full compact custom; Flags: fixed
-Name: "samples"; Description: "Factory Sample Sounds (~42 MB)"; Types: full
-Name: "presets"; Description: "Factory Presets";               Types: full
+Name: "plugin";  Description: "Dope Maker VST3 Plugin";              Types: full compact custom; Flags: fixed
+Name: "factory"; Description: "Factory Presets && Sample Sounds (~42 MB)"; Types: full
 
 [Files]
 ; VST3 bundle — preserves the folder structure
@@ -62,11 +61,10 @@ Source: "{#VST3Source}\Contents\Resources\moduleinfo.json"; DestDir: "{commoncf}
 Source: "{#VST3Source}\Contents\x86_64-win\Dope Maker.vst3"; DestDir: "{commoncf}\VST3\Dope Maker.vst3\Contents\x86_64-win"; Components: plugin; Flags: ignoreversion
 
 ; Factory presets — into the default preset bank
-Source: "{#PresetsSource}\*.dmpreset"; DestDir: "{userappdata}\DopeMakerVST\Presets\Fvcktory Bank"; Components: presets; Flags: ignoreversion; Check: ShouldInstallSample
+Source: "{#PresetsSource}\*.dmpreset"; DestDir: "{userappdata}\DopeMakerVST\Presets\Fvcktory Bank"; Components: factory; Flags: ignoreversion; Check: ShouldInstallSample
 
 ; Factory samples — into the default preset bank's Samples folder
-; onlyifdoesntexist is toggled off at runtime when user chooses to overwrite
-Source: "{#SamplesSource}\*.wav"; DestDir: "{userappdata}\DopeMakerVST\Presets\Fvcktory Bank\Samples"; Components: samples; Flags: ignoreversion; Check: ShouldInstallSample
+Source: "{#SamplesSource}\*.wav"; DestDir: "{userappdata}\DopeMakerVST\Presets\Fvcktory Bank\Samples"; Components: factory; Flags: ignoreversion; Check: ShouldInstallSample
 
 [Dirs]
 ; Ensure the preset structure exists even if no samples are installed
