@@ -8,6 +8,7 @@
 ;
 ; The installer copies:
 ;   - Dope Maker.vst3 bundle  -> C:\Program Files\Common Files\VST3\
+;   - Factory presets (.dmpreset) -> %APPDATA%\DopeMakerVST\Presets\Fvcktory Bank\
 ;   - Factory sample WAVs      -> %APPDATA%\DopeMakerVST\Presets\Fvcktory Bank\Samples\
 
 #define MyAppName      "Dope Maker"
@@ -19,6 +20,7 @@
 #define ProjectRoot    ".."
 #define VST3Source     ProjectRoot + "\output\Dope Maker.vst3"
 #define SamplesSource  ProjectRoot + "\samplesounds"
+#define PresetsSource  ProjectRoot + "\factorypresets"
 
 [Setup]
 AppId={{E7A3F2D1-4B8C-4D2E-9F1A-6C5B3D7E8F90}
@@ -52,11 +54,15 @@ Name: "custom";  Description: "Custom installation"; Flags: iscustom
 [Components]
 Name: "plugin";  Description: "Dope Maker VST3 Plugin";  Types: full compact custom; Flags: fixed
 Name: "samples"; Description: "Factory Sample Sounds (~42 MB)"; Types: full
+Name: "presets"; Description: "Factory Presets";               Types: full
 
 [Files]
 ; VST3 bundle — preserves the folder structure
 Source: "{#VST3Source}\Contents\Resources\moduleinfo.json"; DestDir: "{commoncf}\VST3\Dope Maker.vst3\Contents\Resources"; Components: plugin; Flags: ignoreversion
 Source: "{#VST3Source}\Contents\x86_64-win\Dope Maker.vst3"; DestDir: "{commoncf}\VST3\Dope Maker.vst3\Contents\x86_64-win"; Components: plugin; Flags: ignoreversion
+
+; Factory presets — into the default preset bank
+Source: "{#PresetsSource}\*.dmpreset"; DestDir: "{userappdata}\DopeMakerVST\Presets\Fvcktory Bank"; Components: presets; Flags: ignoreversion; Check: ShouldInstallSample
 
 ; Factory samples — into the default preset bank's Samples folder
 ; onlyifdoesntexist is toggled off at runtime when user chooses to overwrite
