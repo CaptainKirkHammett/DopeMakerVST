@@ -61,10 +61,10 @@ Source: "{#VST3Source}\Contents\Resources\moduleinfo.json"; DestDir: "{commoncf}
 Source: "{#VST3Source}\Contents\x86_64-win\Dope Maker.vst3"; DestDir: "{commoncf}\VST3\Dope Maker.vst3\Contents\x86_64-win"; Components: plugin; Flags: ignoreversion
 
 ; Factory presets — into the default preset bank
-Source: "{#PresetsSource}\*.dmpreset"; DestDir: "{userappdata}\DopeMakerVST\Presets\Fvcktory Bank"; Components: factory; Flags: ignoreversion; Check: ShouldInstallSample
+Source: "{#PresetsSource}\*.dmpreset"; DestDir: "{userappdata}\DopeMakerVST\Presets\Fvcktory Bank"; Components: factory; Flags: ignoreversion setntfscompression; Check: ShouldInstallPreset
 
 ; Factory samples — into the default preset bank's Samples folder
-Source: "{#SamplesSource}\*.wav"; DestDir: "{userappdata}\DopeMakerVST\Presets\Fvcktory Bank\Samples"; Components: factory; Flags: ignoreversion; Check: ShouldInstallSample
+Source: "{#SamplesSource}\*.wav"; DestDir: "{userappdata}\DopeMakerVST\Presets\Fvcktory Bank\Samples"; Components: factory; Flags: ignoreversion setntfscompression; Check: ShouldInstallSample
 
 [Dirs]
 ; Ensure the preset structure exists even if no samples are installed
@@ -119,6 +119,19 @@ begin
       Result := True
     else
       CloseHandle(FileHandle);
+  end;
+end;
+
+function ShouldInstallPreset(): Boolean;
+var
+  DestPath: String;
+begin
+  if OverwriteSamples then
+    Result := True
+  else
+  begin
+    DestPath := ExpandConstant('{userappdata}\DopeMakerVST\Presets\Fvcktory Bank\') + ExtractFileName(CurrentFileName);
+    Result := not FileExists(DestPath);
   end;
 end;
 
