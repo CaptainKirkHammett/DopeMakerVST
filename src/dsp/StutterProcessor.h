@@ -35,7 +35,9 @@ public:
     std::atomic<int> currentEffectiveDivIndex { 2 };  // default: 1/16
 
 private:
-    static constexpr int kCrossfadeSamples = 512;  // ~11.6 ms at 44.1k — smooth transitions
+    static constexpr int kCrossfadeSamples    = 512;  // ~11.6 ms at 44.1k — smooth transitions
+    static constexpr int kMinCrossfadeSamples = 32;   // ~0.7 ms — floor to prevent clicks at short play lengths
+    static constexpr int kMinPlayLenSamples   = 64;   // play length can never shrink below this
     static constexpr int kMaxBufferSecs    = 2;
 
     double sampleRate_ = 44100.0;

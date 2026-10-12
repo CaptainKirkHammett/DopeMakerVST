@@ -186,9 +186,18 @@ void SamplerVoice::startNote (int note, float vel,
     deClickingOut     = false;
     loopXfadeCounter  = 0;
 
-    // Fade in from silence to avoid a click when the sample doesn't start at zero.
-    deClickGain.setCurrentAndTargetValue (0.0f);
-    deClickGain.setTargetValue (1.0f);
+    // Fade in from silence to avoid a click when the sample starts mid-waveform.
+    // Skip the fade when playback begins at the sample's natural start (frame 0)
+    // — the sample already has its own attack or built-in fade there.
+    if (readPos > 1.0)
+    {
+        deClickGain.setCurrentAndTargetValue (0.0f);
+        deClickGain.setTargetValue (1.0f);
+    }
+    else
+    {
+        deClickGain.setCurrentAndTargetValue (1.0f);
+    }
 
     // Set up portamento glide.  Glide only applies in legato mode — arpeggiated
     // and stolen voices always jump instantly to the new pitch.

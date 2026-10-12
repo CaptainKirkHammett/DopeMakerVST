@@ -55,7 +55,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     titleLabel.addMouseListener (this, false);
     uiRoot.addAndMakeVisible (titleLabel);
 
-    betaLabel.setText ("Beta v0.2780.0.3", juce::dontSendNotification);
+    betaLabel.setText ("Beta v0.2780.0.4", juce::dontSendNotification);
     betaLabel.setFont (juce::Font (16.0f, juce::Font::italic));
     betaLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff).withAlpha (0.7f));
     betaLabel.setJustificationType (juce::Justification::topLeft);

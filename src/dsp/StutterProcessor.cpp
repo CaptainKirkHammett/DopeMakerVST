@@ -229,7 +229,7 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
     if (stutterActive_ && stutterSegLen_ > 0)
     {
         const float clampedLen = juce::jlimit (0.0f, 1.0f, length);
-        const int targetPlayLen = juce::jmax (1, static_cast<int> (clampedLen * stutterSegLen_));
+        const int targetPlayLen = juce::jmax (kMinPlayLenSamples, static_cast<int> (clampedLen * stutterSegLen_));
         smoothedPlayLen_.setTargetValue (static_cast<float> (targetPlayLen));
     }
 
@@ -276,12 +276,12 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
                     stutterSegLen_   = juce::jmin (newInterval, captureLength_);
                     stutterSegStart_ = (captureWritePos_ - stutterSegLen_ + bufCapacity) % bufCapacity;
                     lengthParam_     = juce::jlimit (0.0f, 1.0f, length);
-                    stutterPlayLen_  = juce::jmax (1, static_cast<int> (lengthParam_ * stutterSegLen_));
+                    stutterPlayLen_  = juce::jmax (kMinPlayLenSamples, static_cast<int> (lengthParam_ * stutterSegLen_));
                     smoothedPlayLen_.setCurrentAndTargetValue (static_cast<float> (stutterPlayLen_));
                     lenWrapFading_      = false;
                     loopFadeRemaining_  = 0;
                     fadeOutRemaining_   = 0;  // cancel any in-progress fade-out
-                    fadeInTotal_        = juce::jmin (kCrossfadeSamples, stutterPlayLen_ / 2);
+                    fadeInTotal_        = juce::jlimit (kMinCrossfadeSamples, kCrossfadeSamples, stutterPlayLen_ / 2);
                     fadeInRemaining_    = fadeInTotal_;
                 }
             }
@@ -299,15 +299,16 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
                     // division and reset read position to the beat boundary so the
                     // stutter loop stays locked to the DAW transport grid.
                     stutterSegLen_  = juce::jmin (newInterval, captureLength_);
-                    stutterPlayLen_ = juce::jmax (1, static_cast<int> (lengthParam_ * stutterSegLen_));
+                    stutterPlayLen_ = juce::jmax (kMinPlayLenSamples, static_cast<int> (lengthParam_ * stutterSegLen_));
                     smoothedPlayLen_.setTargetValue (static_cast<float> (stutterPlayLen_));
 
                     // Crossfade from old tail into new loop head using
                     // single-sample blend (segment just changed, can't continue).
+                    lenWrapFading_ = false;           // cancel conflicting fade
                     loopFadeContinuation_ = false;
                     loopFadeOldL_      = lastWetL_;
                     loopFadeOldR_      = lastWetR_;
-                    loopFadeTotal_     = juce::jmax (1, juce::jmin (kCrossfadeSamples, stutterPlayLen_ / 2));
+                    loopFadeTotal_     = juce::jlimit (kMinCrossfadeSamples, kCrossfadeSamples, stutterPlayLen_ / 2);
                     loopFadeRemaining_ = loopFadeTotal_;
                     stutterReadPos_ = 0;
                 }
@@ -331,7 +332,7 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
         if (stutterActive_)
         {
             // Smoothly update play length per-sample from LFO-modulated target.
-            stutterPlayLen_ = juce::jmax (1, static_cast<int> (smoothedPlayLen_.getNextValue()));
+            stutterPlayLen_ = juce::jmax (kMinPlayLenSamples, static_cast<int> (smoothedPlayLen_.getNextValue()));
 
             // In repeat mode, if read pos exceeds the (now shorter) play length,
             // wrap back and crossfade to avoid a click.
@@ -340,7 +341,8 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
                 lenWrapOldL_ = lastWetL_;
                 lenWrapOldR_ = lastWetR_;
                 lenWrapFading_ = true;
-                lenWrapFadeTotal_  = juce::jmax (1, juce::jmin (kCrossfadeSamples, stutterPlayLen_ / 2));
+                loopFadeRemaining_ = 0;            // cancel conflicting fade
+                lenWrapFadeTotal_  = juce::jlimit (kMinCrossfadeSamples, kCrossfadeSamples, stutterPlayLen_ / 2);
                 lenWrapFadeRemain_ = lenWrapFadeTotal_;
                 stutterReadPos_ = stutterReadPos_ % stutterPlayLen_;
             }
@@ -348,7 +350,7 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
             float wetL = 0.0f, wetR = 0.0f;
 
             const int loopLen = repeatMode ? stutterPlayLen_ : stutterSegLen_;
-            const int xfade   = juce::jmax (1, juce::jmin (kCrossfadeSamples, stutterPlayLen_ / 2));
+            const int xfade   = juce::jlimit (kMinCrossfadeSamples, kCrossfadeSamples, stutterPlayLen_ / 2);
 
             if (stutterReadPos_ < stutterPlayLen_ && stutterSegLen_ > 0)
             {
@@ -449,6 +451,7 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
                 const bool useContinuation = repeatMode
                                           && stutterPlayLen_ < stutterSegLen_;
 
+                lenWrapFading_ = false;              // cancel conflicting fade
                 loopFadeContinuation_ = useContinuation;
                 if (useContinuation)
                 {
@@ -460,7 +463,7 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
                     loopFadeOldR_ = lastWetR_;
                 }
 
-                loopFadeTotal_     = juce::jmax (1, juce::jmin (kCrossfadeSamples, loopLen / 2));
+                loopFadeTotal_     = juce::jlimit (kMinCrossfadeSamples, kCrossfadeSamples, loopLen / 2);
                 loopFadeRemaining_ = loopFadeTotal_;
                 stutterReadPos_    = 0;
             }
