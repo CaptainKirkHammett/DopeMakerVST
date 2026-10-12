@@ -48,11 +48,11 @@ double StutterProcessor::divisionToBeats (int divIdx) const
     return kDivBeats[juce::jlimit (0, kNumDivisions - 1, divIdx)];
 }
 
-int StutterProcessor::holdSamplesFor8th (double bpm) const
+int StutterProcessor::holdSamplesFor16th (double bpm) const
 {
     const double beatsPerSec = bpm / 60.0;
-    // 1/8 note = 0.5 beats
-    return juce::jmax (1, static_cast<int> ((0.5 / beatsPerSec) * sampleRate_));
+    // 1/16 note = 0.25 beats
+    return juce::jmax (1, static_cast<int> ((0.25 / beatsPerSec) * sampleRate_));
 }
 
 int StutterProcessor::effectiveDivIndex (float lfoLow, float lfoHigh) const
@@ -92,7 +92,7 @@ int StutterProcessor::constrainFastDiv (int candidate, float lfoLow, float lfoHi
     // Fast division requested.
     if (consecutiveFast_ >= 1)
     {
-        // Already had one fast burst (1/8 note) — force a slow division.
+        // Already had one fast burst (1/16 note) — force a slow division.
         // Pick randomly from slow divisions (0=1/4, 1=1/8, 2=1/16) within the
         // selected [lfoLow, lfoHigh] range.
         const int lo = juce::jlimit (0, 2, static_cast<int> (lfoLow));
@@ -252,65 +252,69 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
         {
             boundaryThisBlock = false;  // consume the event
 
-            // Only allow a division change when the hold has expired.
-            // This guarantees every division plays for at least 1/8 note.
+            // During hold, skip all boundary processing — the stutter loops
+            // naturally via the loop-end wrap code.  This prevents fast divisions
+            // from being cut short by probability checks firing at every sub-beat.
             if (holdSamplesRemaining_ <= 0)
             {
                 activeDivIdx_ = constrainFastDiv (rawIdx, lfoLow, lfoHigh);
                 currentEffectiveDivIndex.store (activeDivIdx_, std::memory_order_relaxed);
-                holdSamplesRemaining_ = holdSamplesFor8th (safeBpm);
-            }
+                holdSamplesRemaining_ = holdSamplesFor16th (safeBpm);
 
-            // Compute interval for the committed division.
-            const double newBeats    = divisionToBeats (activeDivIdx_);
-            const double newSamples  = (newBeats / (safeBpm / 60.0)) * sampleRate_;
-            const int    newInterval = juce::jmax (1, static_cast<int> (newSamples));
+                // Compute interval for the committed division.
+                const double newBeats    = divisionToBeats (activeDivIdx_);
+                const double newSamples  = (newBeats / (safeBpm / 60.0)) * sampleRate_;
+                const int    newInterval = juce::jmax (1, static_cast<int> (newSamples));
 
-            if (!stutterActive_)
-            {
-                // Currently OFF — probability chance to turn ON.
-                if (rng_.nextFloat() < amount)
+                if (!stutterActive_)
                 {
-                    stutterActive_   = true;
-                    stutterReadPos_  = 0;
-                    stutterSegLen_   = juce::jmin (newInterval, captureLength_);
-                    stutterSegStart_ = (captureWritePos_ - stutterSegLen_ + bufCapacity) % bufCapacity;
-                    lengthParam_     = juce::jlimit (0.0f, 1.0f, length);
-                    stutterPlayLen_  = juce::jmax (kMinPlayLenSamples, static_cast<int> (lengthParam_ * stutterSegLen_));
-                    smoothedPlayLen_.setCurrentAndTargetValue (static_cast<float> (stutterPlayLen_));
-                    lenWrapFading_      = false;
-                    loopFadeRemaining_  = 0;
-                    fadeOutRemaining_   = 0;  // cancel any in-progress fade-out
-                    fadeInTotal_        = juce::jlimit (kMinCrossfadeSamples, kCrossfadeSamples, stutterPlayLen_ / 2);
-                    fadeInRemaining_    = fadeInTotal_;
-                }
-            }
-            else
-            {
-                if (rng_.nextFloat() >= amount)
-                {
-                    // Probability chance to turn OFF.
-                    fadeOutRemaining_ = kCrossfadeSamples;
-                    stutterActive_ = false;
+                    // Currently OFF — probability chance to turn ON.
+                    if (rng_.nextFloat() < amount)
+                    {
+                        stutterActive_   = true;
+                        stutterReadPos_  = 0;
+                        stutterSegLen_   = juce::jmin (newInterval, captureLength_);
+                        maxSegLen_       = stutterSegLen_;  // cap for later division changes
+                        stutterSegStart_ = (captureWritePos_ - stutterSegLen_ + bufCapacity) % bufCapacity;
+                        lengthParam_     = juce::jlimit (0.0f, 1.0f, length);
+                        stutterPlayLen_  = juce::jmax (kMinPlayLenSamples, static_cast<int> (lengthParam_ * stutterSegLen_));
+                        smoothedPlayLen_.setCurrentAndTargetValue (static_cast<float> (stutterPlayLen_));
+                        lenWrapFading_      = false;
+                        loopFadeRemaining_  = 0;
+                        fadeOutRemaining_   = 0;  // cancel any in-progress fade-out
+                        fadeInTotal_        = juce::jlimit (kMinCrossfadeSamples, kCrossfadeSamples, stutterPlayLen_ / 2);
+                        fadeInRemaining_    = fadeInTotal_;
+                    }
                 }
                 else
                 {
-                    // Stay on — update segment length to match the (possibly changed)
-                    // division and reset read position to the beat boundary so the
-                    // stutter loop stays locked to the DAW transport grid.
-                    stutterSegLen_  = juce::jmin (newInterval, captureLength_);
-                    stutterPlayLen_ = juce::jmax (kMinPlayLenSamples, static_cast<int> (lengthParam_ * stutterSegLen_));
-                    smoothedPlayLen_.setTargetValue (static_cast<float> (stutterPlayLen_));
+                    if (rng_.nextFloat() >= amount)
+                    {
+                        // Probability chance to turn OFF.
+                        fadeOutRemaining_ = kCrossfadeSamples;
+                        stutterActive_ = false;
+                    }
+                    else
+                    {
+                        // Stay on — update segment length to match the (possibly changed)
+                        // division and reset read position to the beat boundary so the
+                        // stutter loop stays locked to the DAW transport grid.
+                        // Cap at maxSegLen_ so a fast→slow transition never reads
+                        // stale audio beyond the originally captured segment.
+                        stutterSegLen_  = juce::jmin (newInterval, juce::jmin (captureLength_, maxSegLen_));
+                        stutterPlayLen_ = juce::jmax (kMinPlayLenSamples, static_cast<int> (lengthParam_ * stutterSegLen_));
+                        smoothedPlayLen_.setTargetValue (static_cast<float> (stutterPlayLen_));
 
-                    // Crossfade from old tail into new loop head using
-                    // single-sample blend (segment just changed, can't continue).
-                    lenWrapFading_ = false;           // cancel conflicting fade
-                    loopFadeContinuation_ = false;
-                    loopFadeOldL_      = lastWetL_;
-                    loopFadeOldR_      = lastWetR_;
-                    loopFadeTotal_     = juce::jlimit (kMinCrossfadeSamples, kCrossfadeSamples, stutterPlayLen_ / 2);
-                    loopFadeRemaining_ = loopFadeTotal_;
-                    stutterReadPos_ = 0;
+                        // Crossfade from old tail into new loop head using
+                        // single-sample blend (segment just changed, can't continue).
+                        lenWrapFading_ = false;           // cancel conflicting fade
+                        loopFadeContinuation_ = false;
+                        loopFadeOldL_      = lastWetL_;
+                        loopFadeOldR_      = lastWetR_;
+                        loopFadeTotal_     = juce::jlimit (kMinCrossfadeSamples, kCrossfadeSamples, stutterPlayLen_ / 2);
+                        loopFadeRemaining_ = loopFadeTotal_;
+                        stutterReadPos_ = 0;
+                    }
                 }
             }
         }
@@ -336,6 +340,8 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
 
             // In repeat mode, if read pos exceeds the (now shorter) play length,
             // wrap back and crossfade to avoid a click.
+            // Always reset to 0 — using modulo would drift the start position by
+            // 1+ samples whenever smoothed playLen jitters between integer values.
             if (repeatMode && stutterReadPos_ >= stutterPlayLen_ && stutterSegLen_ > 0)
             {
                 lenWrapOldL_ = lastWetL_;
@@ -344,7 +350,7 @@ void StutterProcessor::process (juce::AudioBuffer<float>& buffer, int numSamples
                 loopFadeRemaining_ = 0;            // cancel conflicting fade
                 lenWrapFadeTotal_  = juce::jlimit (kMinCrossfadeSamples, kCrossfadeSamples, stutterPlayLen_ / 2);
                 lenWrapFadeRemain_ = lenWrapFadeTotal_;
-                stutterReadPos_ = stutterReadPos_ % stutterPlayLen_;
+                stutterReadPos_ = 0;
             }
 
             float wetL = 0.0f, wetR = 0.0f;

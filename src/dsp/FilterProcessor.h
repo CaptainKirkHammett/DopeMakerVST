@@ -41,7 +41,12 @@ private:
     // Power-of-2 size covers down to ~3 Hz at 192 kHz.
     static constexpr int kCombBufSize = 16384;
     juce::AudioBuffer<float> combDelayBuf;
-    int   combWritePos     { 0 };
-    int   combDelaySamples { 1 };
-    float combFeedback     { 0.0f };
+    int   combWritePos        { 0 };
+    int   combDelaySamples    { 1 };     // integer target (for coefficient calc)
+    float combFeedback        { 0.0f };
+
+    // Per-sample smoothing for comb delay length — prevents clicks from
+    // integer delay jumps when sweeping cutoff.
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> smoothedCombDelay { 1.0f };
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> smoothedCombFeedback { 0.0f };
 };

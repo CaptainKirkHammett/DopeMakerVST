@@ -57,6 +57,7 @@ private:
     int   stutterReadPos_  = 0;   // current read position within the captured segment
     int   stutterSegStart_ = 0;   // frozen start index in circular buffer when stutter began
     int   stutterSegLen_   = 0;   // total captured segment length (= interval in samples)
+    int   maxSegLen_       = 0;   // segment length at activation — cap to avoid reading stale buffer audio
     int   stutterPlayLen_  = 0;   // how many samples to replay before going silent (length * segLen)
 
     // Crossfade state.
@@ -99,13 +100,13 @@ private:
     int  consecutiveFast_ = 0;   // how many consecutive fast steps so far
     int  prevDivIdx_      = -1;  // division used on the previous step
 
-    // Minimum hold: every division (slow or fast) is locked for at least 1/8 note
-    // in samples.  This prevents the LFO from cycling through divisions faster
-    // than 1/8-note intervals, keeping the stutter musically coherent.
+    // Minimum hold: every division (slow or fast) is locked for at least 1/16 note
+    // in samples.  Aligns division changes to a 1/16 grid — the common divisor
+    // of all divisions — so fast→slow transitions don't land mid-cycle.
     int  holdSamplesRemaining_ = 0;
 
-    // Computes the hold duration in samples for a 1/8 note at the given tempo.
-    int  holdSamplesFor8th (double bpm) const;
+    // Computes the hold duration in samples for a 1/16 note at the given tempo.
+    int  holdSamplesFor16th (double bpm) const;
 
     juce::Random rng_;
 

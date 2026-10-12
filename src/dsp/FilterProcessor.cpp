@@ -14,6 +14,11 @@ void FilterProcessor::prepare (const juce::dsp::ProcessSpec& spec)
     combDelayBuf.setSize (static_cast<int> (spec.numChannels), kCombBufSize);
     combDelayBuf.clear();
     combWritePos = 0;
+
+    smoothedCombDelay.reset (spec.sampleRate, 0.005);     // 5 ms ramp
+    smoothedCombDelay.setCurrentAndTargetValue (static_cast<float> (combDelaySamples));
+    smoothedCombFeedback.reset (spec.sampleRate, 0.005);
+    smoothedCombFeedback.setCurrentAndTargetValue (combFeedback);
 }
 
 void FilterProcessor::reset()
@@ -60,6 +65,10 @@ void FilterProcessor::updateCoefficients()
                                          static_cast<int> (sr / static_cast<double> (fc)));
         // Map resonance [0.1, 10.0] → feedback coeff [0.0, 0.9].
         combFeedback = juce::jlimit (0.0f, 0.9f, (q - 0.1f) / 9.9f * 0.9f);
+
+        // Set smoother targets — processComb reads per-sample.
+        smoothedCombDelay.setTargetValue (static_cast<float> (combDelaySamples));
+        smoothedCombFeedback.setTargetValue (combFeedback);
         return;
     }
 
@@ -152,22 +161,36 @@ void FilterProcessor::processComb (juce::dsp::ProcessContextReplacing<float>& co
     const int numChannels = juce::jmin (static_cast<int> (block.getNumChannels()),
                                         combDelayBuf.getNumChannels());
     const float sign = (currentMode == FilterMode::CombPlus) ? 1.0f : -1.0f;
+    const int mask = kCombBufSize - 1;
 
     for (int s = 0; s < numSamples; ++s)
     {
-        const int readPos = (combWritePos - combDelaySamples + kCombBufSize) & (kCombBufSize - 1);
+        // Per-sample smoothed delay and feedback to eliminate clicks when
+        // sweeping cutoff or resonance.
+        const float delaySm = smoothedCombDelay.getNextValue();
+        const float fbSm    = smoothedCombFeedback.getNextValue();
+
+        // Fractional delay: linear interpolation between two adjacent taps
+        // so the read position glides smoothly instead of jumping by whole samples.
+        const float delayF  = juce::jlimit (1.0f, static_cast<float> (kCombBufSize - 1), delaySm);
+        const int   delayI  = static_cast<int> (delayF);
+        const float frac    = delayF - static_cast<float> (delayI);
+
+        const int readPos0 = (combWritePos - delayI     + kCombBufSize) & mask;
+        const int readPos1 = (combWritePos - delayI - 1 + kCombBufSize) & mask;
 
         for (int ch = 0; ch < numChannels; ++ch)
         {
             float* out   = block.getChannelPointer (ch);
             float* delay = combDelayBuf.getWritePointer (ch);
 
+            const float delayed = delay[readPos0] + frac * (delay[readPos1] - delay[readPos0]);
             const float x = out[s];
-            const float y = x + sign * combFeedback * delay[readPos];
+            const float y = x + sign * fbSm * delayed;
             delay[combWritePos] = y;
             out[s] = y;
         }
 
-        combWritePos = (combWritePos + 1) & (kCombBufSize - 1);
+        combWritePos = (combWritePos + 1) & mask;
     }
 }
