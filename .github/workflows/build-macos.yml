@@ -1,0 +1,48 @@
+name: Build macOS
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install cmake ninja
+
+      - name: Configure CMake (Universal Binary)
+        run: >
+          cmake -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Codesign plugins (ad-hoc)
+        run: |
+          codesign --force --deep --sign - "build/SuomiSampler_artefacts/Release/VST3/Dope Maker.vst3"
+          codesign --force --deep --sign - "build/SuomiSampler_artefacts/Release/AU/Dope Maker.component"
+
+      - name: List artefacts
+        run: find build -name "*.vst3" -o -name "*.component" | head -20
+
+      - name: Upload VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: DopeMaker-macOS-VST3
+          path: build/SuomiSampler_artefacts/Release/VST3/Dope Maker.vst3
+
+      - name: Upload AU
+        uses: actions/upload-artifact@v4
+        with:
+          name: DopeMaker-macOS-AU
+          path: build/SuomiSampler_artefacts/Release/AU/Dope Maker.component

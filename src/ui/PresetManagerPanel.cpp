@@ -1,0 +1,557 @@
+#include "PresetManagerPanel.h"
+#include "SuomiLookAndFeel.h"
+
+//==============================================================================
+// Themed confirmation dialog drawn inside the preset panel.
+class PresetManagerPanel::ConfirmOverlay : public juce::Component
+{
+public:
+    ConfirmOverlay (const juce::String& titleText, const juce::String& presetName,
+                    const juce::String& messageText, const juce::String& confirmText,
+                    std::function<void()> onYes, std::function<void()> onNo)
+        : confirmCallback (std::move (onYes)),
+          cancelCallback  (std::move (onNo)),
+          yesButton (confirmText),
+          noButton  ("Cancel")
+    {
+        setInterceptsMouseClicks (true, true);
+
+        titleLabel.setText (titleText, juce::dontSendNotification);
+        titleLabel.setJustificationType (juce::Justification::centred);
+        titleLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff));
+        addAndMakeVisible (titleLabel);
+
+        nameLabel.setText (presetName, juce::dontSendNotification);
+        nameLabel.setJustificationType (juce::Justification::centred);
+        nameLabel.setColour (juce::Label::textColourId, juce::Colour (0xffa0d8ff));
+        nameLabel.setMinimumHorizontalScale (0.0f);
+        addAndMakeVisible (nameLabel);
+
+        messageLabel.setText (messageText, juce::dontSendNotification);
+        messageLabel.setJustificationType (juce::Justification::centred);
+        messageLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.7f));
+        addAndMakeVisible (messageLabel);
+
+        yesButton.onClick = [this] { if (confirmCallback) confirmCallback(); };
+        noButton.onClick  = [this] { if (cancelCallback)  cancelCallback(); };
+        addAndMakeVisible (yesButton);
+        addAndMakeVisible (noButton);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.65f));
+        g.fillAll();
+
+        auto db = getDialogBounds();
+        g.setColour (juce::Colour (0xff18182a));
+        g.fillRoundedRectangle (db, 6.0f);
+        g.setColour (juce::Colour (0xffcc88ff).withAlpha (0.55f));
+        g.drawRoundedRectangle (db.reduced (0.5f), 6.0f, 1.5f);
+    }
+
+    void resized() override
+    {
+        auto area = getDialogBounds().toNearestInt().reduced (14);
+
+        titleLabel.setBounds (area.removeFromTop (22));
+        area.removeFromTop (4);
+        nameLabel.setBounds (area.removeFromTop (20));
+        area.removeFromTop (2);
+        messageLabel.setBounds (area.removeFromTop (18));
+        area.removeFromTop (10);
+
+        auto btnRow = area.removeFromTop (24);
+        const int btnW  = 84;
+        const int gap   = 10;
+        const int total = btnW * 2 + gap;
+        const int startX = btnRow.getCentreX() - total / 2;
+        noButton .setBounds (startX, btnRow.getY(), btnW, 22);
+        yesButton.setBounds (startX + btnW + gap, btnRow.getY(), btnW, 22);
+    }
+
+    void mouseDown (const juce::MouseEvent&) override {}
+
+private:
+    juce::Rectangle<float> getDialogBounds() const
+    {
+        const float w = 310.0f;
+        const float h = 140.0f;
+        return { (getWidth() - w) / 2.0f, (getHeight() - h) / 2.0f, w, h };
+    }
+
+    std::function<void()> confirmCallback;
+    std::function<void()> cancelCallback;
+    juce::Label      titleLabel;
+    juce::Label      nameLabel;
+    juce::Label      messageLabel;
+    juce::TextButton yesButton;
+    juce::TextButton noButton;
+};
+
+//==============================================================================
+// Text-input overlay for naming a new bank.
+class PresetManagerPanel::TextInputOverlay : public juce::Component
+{
+public:
+    TextInputOverlay (const juce::String& titleText,
+                      const juce::String& defaultText,
+                      std::function<void (const juce::String&)> onOk,
+                      std::function<void()> onCancel)
+        : submitCallback (std::move (onOk)),
+          cancelCallback (std::move (onCancel))
+    {
+        setInterceptsMouseClicks (true, true);
+
+        titleLabel.setText (titleText, juce::dontSendNotification);
+        titleLabel.setJustificationType (juce::Justification::centred);
+        titleLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff));
+        addAndMakeVisible (titleLabel);
+
+        editor.setMultiLine (false);
+        editor.setReturnKeyStartsNewLine (false);
+        editor.setText (defaultText);
+        editor.setSelectAllWhenFocused (true);
+        editor.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff1a1a2e));
+        editor.setColour (juce::TextEditor::textColourId,       juce::Colour (0xffa0d8ff));
+        editor.setColour (juce::TextEditor::outlineColourId,    juce::Colour (0xff444466));
+        editor.onReturnKey = [this] { onSubmit(); };
+        addAndMakeVisible (editor);
+
+        okButton.onClick     = [this] { onSubmit(); };
+        cancelButton.onClick = [this] { if (cancelCallback) cancelCallback(); };
+        addAndMakeVisible (okButton);
+        addAndMakeVisible (cancelButton);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.65f));
+        g.fillAll();
+
+        auto db = getDialogBounds();
+        g.setColour (juce::Colour (0xff18182a));
+        g.fillRoundedRectangle (db, 6.0f);
+        g.setColour (juce::Colour (0xffcc88ff).withAlpha (0.55f));
+        g.drawRoundedRectangle (db.reduced (0.5f), 6.0f, 1.5f);
+    }
+
+    void resized() override
+    {
+        auto area = getDialogBounds().toNearestInt().reduced (14);
+
+        titleLabel.setBounds (area.removeFromTop (22));
+        area.removeFromTop (8);
+        editor.setBounds (area.removeFromTop (24));
+        area.removeFromTop (10);
+
+        auto btnRow = area.removeFromTop (24);
+        const int btnW  = 84;
+        const int gap   = 10;
+        const int total = btnW * 2 + gap;
+        const int startX = btnRow.getCentreX() - total / 2;
+        cancelButton.setBounds (startX, btnRow.getY(), btnW, 22);
+        okButton    .setBounds (startX + btnW + gap, btnRow.getY(), btnW, 22);
+    }
+
+    void mouseDown (const juce::MouseEvent&) override {}
+
+private:
+    juce::Rectangle<float> getDialogBounds() const
+    {
+        const float w = 310.0f;
+        const float h = 120.0f;
+        return { (getWidth() - w) / 2.0f, (getHeight() - h) / 2.0f, w, h };
+    }
+
+    void onSubmit()
+    {
+        const auto text = editor.getText().trim();
+        if (text.isNotEmpty() && submitCallback)
+            submitCallback (text);
+    }
+
+    std::function<void (const juce::String&)> submitCallback;
+    std::function<void()> cancelCallback;
+    juce::Label      titleLabel;
+    juce::TextEditor editor;
+    juce::TextButton okButton     { "Create" };
+    juce::TextButton cancelButton { "Cancel" };
+};
+
+//==============================================================================
+PresetManagerPanel::~PresetManagerPanel() = default;
+
+PresetManagerPanel::PresetManagerPanel (PresetManager& pm)
+    : presetManager (pm)
+{
+    titleLabel.setText ("PRESETS", juce::dontSendNotification);
+    titleLabel.setJustificationType (juce::Justification::centred);
+    titleLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff));
+    addAndMakeVisible (titleLabel);
+
+    // Bank selector row.
+    bankLabel.setText ("Bank:", juce::dontSendNotification);
+    bankLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.7f));
+    addAndMakeVisible (bankLabel);
+
+    bankCombo.setColour (juce::ComboBox::backgroundColourId, juce::Colour (0xff1a1a2e));
+    bankCombo.setColour (juce::ComboBox::textColourId,       juce::Colour (0xffa0d8ff));
+    bankCombo.setColour (juce::ComboBox::outlineColourId,    juce::Colour (0xff444466));
+    bankCombo.onChange = [this] { onBankSelected(); };
+    addAndMakeVisible (bankCombo);
+
+    newBankButton.onClick    = [this] { onNewBank(); };
+    deleteBankButton.onClick = [this] { onDeleteBank(); };
+    addAndMakeVisible (newBankButton);
+    addAndMakeVisible (deleteBankButton);
+
+    presetList.setModel (this);
+    presetList.setRowHeight (20);
+    presetList.setMultipleSelectionEnabled (false);
+    presetList.setColour (juce::ListBox::backgroundColourId, juce::Colour (0xff1a1a2e));
+    presetList.setColour (juce::ListBox::outlineColourId,    juce::Colour (0xff444466));
+    addAndMakeVisible (presetList);
+
+    nameEditor.setMultiLine (false);
+    nameEditor.setReturnKeyStartsNewLine (false);
+    nameEditor.setText ("New Preset");
+    nameEditor.setSelectAllWhenFocused (true);
+    nameEditor.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff1a1a2e));
+    nameEditor.setColour (juce::TextEditor::textColourId,       juce::Colour (0xffa0d8ff));
+    nameEditor.setColour (juce::TextEditor::outlineColourId,    juce::Colour (0xff444466));
+    addAndMakeVisible (nameEditor);
+
+    saveButton  .onClick = [this] { onSave(); };
+    deleteButton.onClick = [this] { onDelete(); };
+    closeButton .onClick = [this] { hide(); };
+
+    addAndMakeVisible (saveButton);
+    addAndMakeVisible (deleteButton);
+    addAndMakeVisible (closeButton);
+
+    refreshBankList();
+    refreshPresetList();
+}
+
+void PresetManagerPanel::show (juce::Rectangle<int> anchorBounds)
+{
+    setBounds (anchorBounds);
+    setVisible (true);
+    toFront (false);
+    refreshBankList();
+    refreshPresetList();
+}
+
+void PresetManagerPanel::hide()
+{
+    hideConfirm();
+    hideTextInput();
+    setVisible (false);
+}
+
+//==============================================================================
+// Bank management
+//==============================================================================
+
+void PresetManagerPanel::refreshBankList()
+{
+    bankCombo.clear (juce::dontSendNotification);
+    const auto banks = presetManager.getBankNames();
+
+    for (int i = 0; i < banks.size(); ++i)
+        bankCombo.addItem (banks[i], i + 1); // ComboBox IDs are 1-based
+
+    const int idx = banks.indexOf (presetManager.getCurrentBankName());
+    if (idx >= 0)
+        bankCombo.setSelectedId (idx + 1, juce::dontSendNotification);
+    else if (banks.size() > 0)
+        bankCombo.setSelectedId (1, juce::dontSendNotification);
+}
+
+void PresetManagerPanel::onBankSelected()
+{
+    const auto name = bankCombo.getText();
+    if (name.isEmpty() || name == presetManager.getCurrentBankName())
+        return;
+
+    presetManager.setCurrentBank (name);
+    refreshPresetList();
+    nameEditor.setText ("New Preset", juce::dontSendNotification);
+}
+
+void PresetManagerPanel::onNewBank()
+{
+    showTextInput ("New Bank", "My Bank",
+                   [this] (const juce::String& name)
+                   {
+                       hideTextInput();
+                       if (presetManager.createBank (name))
+                       {
+                           presetManager.setCurrentBank (name);
+                           refreshBankList();
+                           refreshPresetList();
+                       }
+                   });
+}
+
+void PresetManagerPanel::onDeleteBank()
+{
+    const auto bankName = presetManager.getCurrentBankName();
+    if (bankName == PresetManager::kDefaultBank)
+        return; // can't delete factory bank
+
+    showConfirm ("Delete Bank", bankName,
+                 "All presets in this bank will be lost.",
+                 "Delete",
+                 [this, bankName]
+                 {
+                     hideConfirm();
+                     presetManager.deleteBank (bankName);
+                     refreshBankList();
+                     refreshPresetList();
+                 });
+}
+
+//==============================================================================
+
+void PresetManagerPanel::refreshPresetList()
+{
+    presetNames = presetManager.getPresetNames();
+    presetList.updateContent();
+
+    const auto& current = presetManager.getCurrentPresetName();
+    if (current.isNotEmpty())
+    {
+        const int idx = presetNames.indexOf (current);
+        if (idx >= 0)
+        {
+            presetList.selectRow (idx, juce::dontSendNotification);
+            presetList.scrollToEnsureRowIsOnscreen (idx);
+        }
+    }
+}
+
+//==============================================================================
+// ListBoxModel
+//==============================================================================
+int PresetManagerPanel::getNumRows()
+{
+    return presetNames.size();
+}
+
+void PresetManagerPanel::paintListBoxItem (int rowNumber, juce::Graphics& g,
+                                            int width, int height, bool rowIsSelected)
+{
+    if (rowNumber < 0 || rowNumber >= presetNames.size())
+        return;
+
+    if (rowIsSelected)
+    {
+        g.setColour (juce::Colour (0xff7b3fbf).withAlpha (0.65f));
+        g.fillRect (0, 0, width, height);
+    }
+
+    if (auto* slf = dynamic_cast<SuomiLookAndFeel*> (&presetList.getLookAndFeel()))
+        g.setFont (slf->getLabelFontRegular (15.0f));
+
+    g.setColour (rowIsSelected ? juce::Colours::white
+                               : juce::Colours::white.withAlpha (0.85f));
+    g.drawText (presetNames[rowNumber], 8, 0, width - 16, height,
+                juce::Justification::centredLeft, true);
+}
+
+void PresetManagerPanel::listBoxItemClicked (int row, const juce::MouseEvent&)
+{
+    if (row >= 0 && row < presetNames.size())
+        onLoad (presetNames[row]);
+}
+
+//==============================================================================
+void PresetManagerPanel::navigateBy (int delta)
+{
+    const auto names = presetManager.getPresetNames();
+    const int n = names.size();
+    if (n == 0)
+        return;
+
+    const auto& current = presetManager.getCurrentPresetName();
+    const int cur  = names.indexOf (current);
+    const int next = (cur < 0) ? 0 : ((cur + delta + n) % n);
+
+    onLoad (names[next]);
+
+    presetNames = names;
+    presetList.updateContent();
+    presetList.selectRow (next, juce::dontSendNotification);
+    presetList.scrollToEnsureRowIsOnscreen (next);
+}
+
+void PresetManagerPanel::onLoad (const juce::String& name)
+{
+    if (name.isEmpty())
+        return;
+    const juce::File sampleFile = presetManager.loadPreset (name);
+    if (onPresetLoaded)
+        onPresetLoaded (sampleFile);
+    nameEditor.setText (name, juce::dontSendNotification);
+}
+
+void PresetManagerPanel::onSave()
+{
+    const auto name = nameEditor.getText().trim();
+    if (name.isEmpty())
+        return;
+
+    if (presetNames.contains (name))
+    {
+        showConfirm ("Overwrite Preset", name,
+                     "Already exists. Overwrite?",
+                     "Overwrite",
+                     [this, name]
+                     {
+                         hideConfirm();
+                         presetManager.savePreset (name, currentSampleFile);
+                         refreshPresetList();
+                         const int idx = presetNames.indexOf (name);
+                         if (idx >= 0)
+                             presetList.selectRow (idx, juce::dontSendNotification);
+                     });
+        return;
+    }
+
+    presetManager.savePreset (name, currentSampleFile);
+    refreshPresetList();
+    const int idx = presetNames.indexOf (name);
+    if (idx >= 0)
+        presetList.selectRow (idx, juce::dontSendNotification);
+}
+
+void PresetManagerPanel::onDelete()
+{
+    const int selectedRow = presetList.getSelectedRow();
+    if (selectedRow < 0 || selectedRow >= presetNames.size())
+        return;
+
+    const auto name = presetNames[selectedRow];
+
+    showConfirm ("Delete Preset", name,
+                 "This cannot be undone.",
+                 "Delete",
+                 [this, name]
+                 {
+                     hideConfirm();
+                     presetManager.deletePreset (name);
+                     refreshPresetList();
+                     nameEditor.setText ("New Preset", juce::dontSendNotification);
+                 });
+}
+
+//==============================================================================
+void PresetManagerPanel::showConfirm (const juce::String& title, const juce::String& presetName,
+                                       const juce::String& message, const juce::String& confirmText,
+                                       std::function<void()> onConfirm)
+{
+    hideConfirm();
+    confirmOverlay = std::make_unique<ConfirmOverlay> (
+        title, presetName, message, confirmText,
+        std::move (onConfirm),
+        [this] { hideConfirm(); });
+    addAndMakeVisible (*confirmOverlay);
+    confirmOverlay->setBounds (getLocalBounds());
+    confirmOverlay->toFront (true);
+}
+
+void PresetManagerPanel::hideConfirm()
+{
+    if (confirmOverlay)
+    {
+        removeChildComponent (confirmOverlay.get());
+        auto prevent = std::shared_ptr<ConfirmOverlay> (confirmOverlay.release());
+        juce::MessageManager::callAsync ([prevent] {});
+    }
+}
+
+void PresetManagerPanel::showTextInput (const juce::String& title, const juce::String& defaultText,
+                                         std::function<void (const juce::String&)> onSubmit)
+{
+    hideTextInput();
+    textInputOverlay = std::make_unique<TextInputOverlay> (
+        title, defaultText,
+        std::move (onSubmit),
+        [this] { hideTextInput(); });
+    addAndMakeVisible (*textInputOverlay);
+    textInputOverlay->setBounds (getLocalBounds());
+    textInputOverlay->toFront (true);
+}
+
+void PresetManagerPanel::hideTextInput()
+{
+    if (textInputOverlay)
+    {
+        removeChildComponent (textInputOverlay.get());
+        auto prevent = std::shared_ptr<TextInputOverlay> (textInputOverlay.release());
+        juce::MessageManager::callAsync ([prevent] {});
+    }
+}
+
+//==============================================================================
+void PresetManagerPanel::paint (juce::Graphics& g)
+{
+    g.setColour (juce::Colour (0xff18182a));
+    g.fillRoundedRectangle (getLocalBounds().toFloat(), 6.0f);
+
+    g.setColour (juce::Colour (0xffcc88ff).withAlpha (0.55f));
+    g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), 6.0f, 1.5f);
+}
+
+void PresetManagerPanel::resized()
+{
+    auto area = getLocalBounds().reduced (8);
+
+    // Title row.
+    {
+        auto row = area.removeFromTop (24);
+        closeButton.setBounds (row.removeFromRight (24).withSizeKeepingCentre (22, 20));
+        titleLabel .setBounds (row);
+    }
+
+    area.removeFromTop (4);
+
+    // Bank selector row.
+    {
+        auto row = area.removeFromTop (24);
+        bankLabel.setBounds (row.removeFromLeft (38));
+        deleteBankButton.setBounds (row.removeFromRight (22).withSizeKeepingCentre (20, 20));
+        row.removeFromRight (2);
+        newBankButton.setBounds (row.removeFromRight (22).withSizeKeepingCentre (20, 20));
+        row.removeFromRight (4);
+        bankCombo.setBounds (row);
+    }
+
+    area.removeFromTop (6);
+
+    // Scrollable preset list (max 15 rows visible).
+    {
+        const int listH = juce::jmin (presetList.getRowHeight() * 15,
+                                       area.getHeight() - 34);
+        presetList.setBounds (area.removeFromTop (listH));
+    }
+
+    area.removeFromTop (8);
+
+    // Name editor + action buttons row.
+    {
+        auto row = area.removeFromTop (26);
+        saveButton  .setBounds (row.removeFromRight (64).withSizeKeepingCentre (62, 22));
+        row.removeFromRight (4);
+        deleteButton.setBounds (row.removeFromRight (64).withSizeKeepingCentre (62, 22));
+        row.removeFromRight (6);
+        nameEditor  .setBounds (row);
+    }
+
+    if (confirmOverlay)
+        confirmOverlay->setBounds (getLocalBounds());
+    if (textInputOverlay)
+        textInputOverlay->setBounds (getLocalBounds());
+}

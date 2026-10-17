@@ -1,0 +1,325 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ── macOS ──────────────────────────────────────────────────────────
+  build-macos:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install cmake ninja
+
+      - name: Configure CMake (Universal Binary)
+        run: >
+          cmake -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Codesign plugins (ad-hoc)
+        run: |
+          codesign --force --deep --sign - "build/SuomiSampler_artefacts/Release/VST3/Dope Maker.vst3"
+          codesign --force --deep --sign - "build/SuomiSampler_artefacts/Release/AU/Dope Maker.component"
+
+      - name: Get version
+        id: version
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "ver=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ver=dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Manual-install ZIP ──
+      - name: Package macOS ZIP
+        run: |
+          VER="${{ steps.version.outputs.ver }}"
+          STAGE="staging-macos"
+          mkdir -p "$STAGE/Dope Maker.vst3"
+          mkdir -p "$STAGE/Dope Maker.component"
+          mkdir -p "$STAGE/Fvcktory Bank/Samples"
+
+          cp -R "build/SuomiSampler_artefacts/Release/VST3/Dope Maker.vst3/"* "$STAGE/Dope Maker.vst3/"
+          cp -R "build/SuomiSampler_artefacts/Release/AU/Dope Maker.component/"* "$STAGE/Dope Maker.component/"
+          cp factorypresets/*.dmpreset "$STAGE/Fvcktory Bank/"
+          cp samplesounds/*.wav "$STAGE/Fvcktory Bank/Samples/"
+
+          cat > "$STAGE/README.txt" << 'READMEEOF'
+          Dope Maker — macOS Manual Installation
+          =======================================
+
+          1. PLUGIN (VST3)
+             Copy "Dope Maker.vst3" to:
+               /Library/Audio/Plug-Ins/VST3/
+
+          2. PLUGIN (AU)
+             Copy "Dope Maker.component" to:
+               /Library/Audio/Plug-Ins/Components/
+
+          3. FACTORY PRESETS & SAMPLES
+             Copy the "Fvcktory Bank" folder to:
+               ~/Library/Application Support/DopeMakerVST/Presets/
+
+             Final structure should look like:
+               ~/Library/Application Support/DopeMakerVST/Presets/Fvcktory Bank/
+                 ├── *.dmpreset
+                 └── Samples/
+                     └── *.wav
+
+          4. QUARANTINE REMOVAL (if DAW doesn't find the plugin)
+             Open Terminal and run:
+               sudo xattr -rd com.apple.quarantine "/Library/Audio/Plug-Ins/VST3/Dope Maker.vst3"
+               sudo xattr -rd com.apple.quarantine "/Library/Audio/Plug-Ins/Components/Dope Maker.component"
+
+          5. Rescan plugins in your DAW.
+
+          Website: https://dope.town
+          READMEEOF
+
+          cd "$STAGE"
+          zip -r "../DopeMaker_${VER}_macOS.zip" .
+
+      # ── macOS .pkg installer ──
+      - name: Build macOS installer (.pkg)
+        run: |
+          VER="${{ steps.version.outputs.ver }}"
+          PKG_ROOT="pkg-root"
+
+          # VST3
+          mkdir -p "$PKG_ROOT/Library/Audio/Plug-Ins/VST3"
+          cp -R "build/SuomiSampler_artefacts/Release/VST3/Dope Maker.vst3" \
+                "$PKG_ROOT/Library/Audio/Plug-Ins/VST3/"
+
+          # AU
+          mkdir -p "$PKG_ROOT/Library/Audio/Plug-Ins/Components"
+          cp -R "build/SuomiSampler_artefacts/Release/AU/Dope Maker.component" \
+                "$PKG_ROOT/Library/Audio/Plug-Ins/Components/"
+
+          # Factory presets — installed via postinstall script to user home
+          mkdir -p pkg-presets/Fvcktory\ Bank/Samples
+          cp factorypresets/*.dmpreset "pkg-presets/Fvcktory Bank/"
+          cp samplesounds/*.wav "pkg-presets/Fvcktory Bank/Samples/"
+
+          # Postinstall script copies presets to the running user's Application Support
+          mkdir -p scripts
+          cat > scripts/postinstall << 'SCRIPT'
+#!/bin/bash
+PRESET_SRC="/tmp/DopeMaker_FactoryPresets"
+# Determine the real user (not root)
+if [ -n "$USER" ] && [ "$USER" != "root" ]; then
+  TARGET_USER="$USER"
+elif [ -n "$SUDO_USER" ]; then
+  TARGET_USER="$SUDO_USER"
+else
+  TARGET_USER=$(stat -f "%Su" /dev/console)
+fi
+USER_HOME=$(dscl . -read /Users/"$TARGET_USER" NFSHomeDirectory | awk '{print $2}')
+PRESET_DIR="$USER_HOME/Library/Application Support/DopeMakerVST/Presets/Fvcktory Bank"
+SAMPLES_DIR="$PRESET_DIR/Samples"
+
+mkdir -p "$SAMPLES_DIR"
+
+# Copy presets (don't overwrite existing)
+for f in "$PRESET_SRC"/*.dmpreset; do
+  [ -f "$f" ] || continue
+  dest="$PRESET_DIR/$(basename "$f")"
+  [ -f "$dest" ] || cp "$f" "$dest"
+done
+
+# Copy samples (don't overwrite existing)
+for f in "$PRESET_SRC"/Samples/*.wav; do
+  [ -f "$f" ] || continue
+  dest="$SAMPLES_DIR/$(basename "$f")"
+  [ -f "$dest" ] || cp "$f" "$dest"
+done
+
+# Fix ownership
+chown -R "$TARGET_USER" "$USER_HOME/Library/Application Support/DopeMakerVST"
+
+# Clean up
+rm -rf "$PRESET_SRC"
+exit 0
+SCRIPT
+          chmod +x scripts/postinstall
+
+          # Preinstall cleans stale temp files from a previous install attempt
+          cat > scripts/preinstall << 'SCRIPT'
+#!/bin/bash
+rm -rf /tmp/DopeMaker_FactoryPresets
+exit 0
+SCRIPT
+          chmod +x scripts/preinstall
+
+          # Copy presets to the pkg payload at /tmp location
+          mkdir -p "$PKG_ROOT/tmp/DopeMaker_FactoryPresets/Samples"
+          cp factorypresets/*.dmpreset "$PKG_ROOT/tmp/DopeMaker_FactoryPresets/"
+          cp samplesounds/*.wav "$PKG_ROOT/tmp/DopeMaker_FactoryPresets/Samples/"
+
+          # Build the .pkg
+          pkgbuild \
+            --root "$PKG_ROOT" \
+            --scripts scripts \
+            --identifier "town.dope.dopemaker" \
+            --version "${VER#v}" \
+            --install-location "/" \
+            "DopeMaker_${VER}_macOS.pkg"
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release
+          path: |
+            DopeMaker_*_macOS.zip
+            DopeMaker_*_macOS.pkg
+
+  # ── Windows ────────────────────────────────────────────────────────
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -A x64
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "ver=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ver=dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Manual-install ZIP ──
+      - name: Package Windows ZIP
+        shell: bash
+        run: |
+          VER="${{ steps.version.outputs.ver }}"
+          STAGE="staging-windows"
+          mkdir -p "$STAGE/Dope Maker.vst3/Contents/x86_64-win"
+          mkdir -p "$STAGE/Dope Maker.vst3/Contents/Resources"
+          mkdir -p "$STAGE/Fvcktory Bank/Samples"
+
+          cp "build/SuomiSampler_artefacts/Release/VST3/Dope Maker.vst3/Contents/x86_64-win/Dope Maker.vst3" \
+             "$STAGE/Dope Maker.vst3/Contents/x86_64-win/"
+          cp "build/SuomiSampler_artefacts/Release/VST3/Dope Maker.vst3/Contents/Resources/moduleinfo.json" \
+             "$STAGE/Dope Maker.vst3/Contents/Resources/"
+          cp factorypresets/*.dmpreset "$STAGE/Fvcktory Bank/"
+          cp samplesounds/*.wav "$STAGE/Fvcktory Bank/Samples/"
+
+          cat > "$STAGE/README.txt" << 'READMEEOF'
+          Dope Maker — Windows Manual Installation
+          =========================================
+
+          1. PLUGIN (VST3)
+             Copy the "Dope Maker.vst3" folder to:
+               C:\Program Files\Common Files\VST3\
+
+          2. FACTORY PRESETS & SAMPLES
+             Copy the "Fvcktory Bank" folder to:
+               %APPDATA%\DopeMakerVST\Presets\
+
+             To open that folder, press Win+R and paste:
+               %APPDATA%\DopeMakerVST\Presets
+
+             Final structure should look like:
+               %APPDATA%\DopeMakerVST\Presets\Fvcktory Bank\
+                 ├── *.dmpreset
+                 └── Samples\
+                     └── *.wav
+
+          3. Rescan plugins in your DAW.
+
+          Website: https://dope.town
+          READMEEOF
+
+      - name: Create Windows ZIP
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.version.outputs.ver }}"
+          Compress-Archive -Path "staging-windows/*" -DestinationPath "DopeMaker_${ver}_Windows.zip"
+
+      # ── Inno Setup installer ──
+      - name: Update Inno Setup version from tag
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          VER="${{ github.ref_name }}"
+          VER="${VER#v}"
+          sed -i "s/^#define MyAppVersion.*/#define MyAppVersion   \"${VER}\"/" installer/DopeMakerInstaller.iss
+
+      - name: Copy VST3 to output for Inno Setup
+        shell: bash
+        run: |
+          mkdir -p output
+          cp -R "build/SuomiSampler_artefacts/Release/VST3/Dope Maker.vst3" output/
+
+      - name: Build Inno Setup installer
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.5
+        with:
+          path: installer/DopeMakerInstaller.iss
+
+      - name: Rename installer
+        shell: bash
+        run: |
+          VER="${{ steps.version.outputs.ver }}"
+          # Find the built installer and rename with version
+          INSTALLER=$(find installer/output -name "*.exe" | head -1)
+          if [ -n "$INSTALLER" ]; then
+            cp "$INSTALLER" "DopeMaker_${VER}_Windows_Setup.exe"
+          fi
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            DopeMaker_*_Windows.zip
+            DopeMaker_*_Windows_Setup.exe
+
+  # ── GitHub Release ─────────────────────────────────────────────────
+  release:
+    needs: [build-macos, build-windows]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: List release files
+        run: ls -lh DopeMaker_*
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Dope Maker ${{ github.ref_name }}
+          draft: false
+          generate_release_notes: true
+          files: |
+            DopeMaker_*_macOS.zip
+            DopeMaker_*_macOS.pkg
+            DopeMaker_*_Windows.zip
+            DopeMaker_*_Windows_Setup.exe
