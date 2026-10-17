@@ -192,14 +192,14 @@ namespace ParamIDs
     inline constexpr const char* reverbRevDiv   = "reverbRevDiv";
 
     // --- Highcut (LP) ---
-    inline constexpr const char* highcutEnabled = "highcutEnabled";
-    inline constexpr const char* highcutFreq    = "highcutFreq";   // Hz, 200–20000
-    inline constexpr const char* highcutAmt     = "highcutAmt";    // 0–1
+    inline constexpr const char* highcutMode    = "highcutEnabled";  // 0=Off, 1=Pre, 2=Post (ID kept for preset compat)
+    inline constexpr const char* highcutFreq    = "highcutFreq";     // Hz, 200–20000
+    inline constexpr const char* highcutAmt     = "highcutAmt";      // 0–1
 
     // --- Lowcut (HP) ---
-    inline constexpr const char* lowcutEnabled  = "lowcutEnabled";
-    inline constexpr const char* lowcutFreq     = "lowcutFreq";    // Hz, 20–2000
-    inline constexpr const char* lowcutAmt      = "lowcutAmt";     // 0–1
+    inline constexpr const char* lowcutMode     = "lowcutEnabled";  // 0=Off, 1=Pre, 2=Post (ID kept for preset compat)
+    inline constexpr const char* lowcutFreq     = "lowcutFreq";     // Hz, 20–2000
+    inline constexpr const char* lowcutAmt      = "lowcutAmt";      // 0–1
 
     // --- Clip ---
     inline constexpr const char* clipEnabled = "clipEnabled";

@@ -1,12 +1,16 @@
 #include "HighcutPanel.h"
 #include "../ParameterIDs.h"
 
-HighcutPanel::HighcutPanel (juce::AudioProcessorValueTreeState& apvts)
+HighcutPanel::HighcutPanel (juce::AudioProcessorValueTreeState& apvts_)
+    : apvts (apvts_)
 {
+    modeParam = apvts.getParameter (ParamIDs::highcutMode);
+
     enableButton.getProperties().set ("fxButton", true);
+    enableButton.setClickingTogglesState (false);
+    enableButton.onClick = [this] { showModeMenu(); };
     addAndMakeVisible (enableButton);
-    enableAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
-        apvts, ParamIDs::highcutEnabled, enableButton);
+    syncButtonState();
 
     freqSlider.setSliderStyle  (juce::Slider::RotaryVerticalDrag);
     freqSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
@@ -35,7 +39,50 @@ HighcutPanel::HighcutPanel (juce::AudioProcessorValueTreeState& apvts)
 
     freqSlider.onValueChange  = [this] { repaint(); };
     amtSlider.onValueChange   = [this] { repaint(); };
-    enableButton.onClick      = [this] { repaint(); };
+}
+
+HighcutPanel::~HighcutPanel() = default;
+
+void HighcutPanel::syncButtonState()
+{
+    if (modeParam == nullptr)
+        return;
+
+    const int mode = (int) modeParam->convertFrom0to1 (modeParam->getValue());
+    enableButton.setToggleState (mode > 0, juce::dontSendNotification);
+
+    if (mode == 1)
+        enableButton.setButtonText ("HiPre");
+    else if (mode == 2)
+        enableButton.setButtonText ("HiPost");
+    else
+        enableButton.setButtonText ("Highcut");
+
+    repaint();
+}
+
+void HighcutPanel::showModeMenu()
+{
+    const int currentMode = (int) modeParam->convertFrom0to1 (modeParam->getValue());
+
+    juce::PopupMenu menu;
+    menu.addItem (1, "Off",  true, currentMode == 0);
+    menu.addItem (2, "Pre",  true, currentMode == 1);
+    menu.addItem (3, "Post", true, currentMode == 2);
+
+    menu.showMenuAsync (juce::PopupMenu::Options()
+        .withTargetComponent (&enableButton),
+        [this] (int result)
+        {
+            if (result == 0)
+                return;
+
+            const int newMode = result - 1;  // 0=Off, 1=Pre, 2=Post
+            modeParam->beginChangeGesture();
+            modeParam->setValueNotifyingHost (modeParam->convertTo0to1 ((float) newMode));
+            modeParam->endChangeGesture();
+            syncButtonState();
+        });
 }
 
 void HighcutPanel::setSpectrumSource (SpectrumSource* source)
@@ -49,6 +96,8 @@ void HighcutPanel::setSpectrumSource (SpectrumSource* source)
 
 void HighcutPanel::timerCallback()
 {
+    syncButtonState();
+
     if (spectrumSource != nullptr && spectrumSource->pullSpectrum (spectrumMags))
     {
         hasSpectrumData = true;
@@ -133,7 +182,7 @@ void HighcutPanel::paint (juce::Graphics& g)
         g.fillPath  (fill);
     }
 
-    // Curve outline — neon red (matches FX-section knob pointer).
+    // Curve outline — neon blue.
     {
         juce::Path line;
         line.startNewSubPath (vb.getX(), ys[0]);

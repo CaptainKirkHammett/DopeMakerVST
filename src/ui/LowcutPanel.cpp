@@ -1,12 +1,16 @@
 #include "LowcutPanel.h"
 #include "../ParameterIDs.h"
 
-LowcutPanel::LowcutPanel (juce::AudioProcessorValueTreeState& apvts)
+LowcutPanel::LowcutPanel (juce::AudioProcessorValueTreeState& apvts_)
+    : apvts (apvts_)
 {
+    modeParam = apvts.getParameter (ParamIDs::lowcutMode);
+
     enableButton.getProperties().set ("fxButton", true);
+    enableButton.setClickingTogglesState (false);
+    enableButton.onClick = [this] { showModeMenu(); };
     addAndMakeVisible (enableButton);
-    enableAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
-        apvts, ParamIDs::lowcutEnabled, enableButton);
+    syncButtonState();
 
     freqSlider.setSliderStyle  (juce::Slider::RotaryVerticalDrag);
     freqSlider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
@@ -35,7 +39,50 @@ LowcutPanel::LowcutPanel (juce::AudioProcessorValueTreeState& apvts)
 
     freqSlider.onValueChange  = [this] { repaint(); };
     amtSlider.onValueChange   = [this] { repaint(); };
-    enableButton.onClick      = [this] { repaint(); };
+}
+
+LowcutPanel::~LowcutPanel() = default;
+
+void LowcutPanel::syncButtonState()
+{
+    if (modeParam == nullptr)
+        return;
+
+    const int mode = (int) modeParam->convertFrom0to1 (modeParam->getValue());
+    enableButton.setToggleState (mode > 0, juce::dontSendNotification);
+
+    if (mode == 1)
+        enableButton.setButtonText ("LowPre");
+    else if (mode == 2)
+        enableButton.setButtonText ("LowPost");
+    else
+        enableButton.setButtonText ("Lowcut");
+
+    repaint();
+}
+
+void LowcutPanel::showModeMenu()
+{
+    const int currentMode = (int) modeParam->convertFrom0to1 (modeParam->getValue());
+
+    juce::PopupMenu menu;
+    menu.addItem (1, "Off",  true, currentMode == 0);
+    menu.addItem (2, "Pre",  true, currentMode == 1);
+    menu.addItem (3, "Post", true, currentMode == 2);
+
+    menu.showMenuAsync (juce::PopupMenu::Options()
+        .withTargetComponent (&enableButton),
+        [this] (int result)
+        {
+            if (result == 0)
+                return;
+
+            const int newMode = result - 1;  // 0=Off, 1=Pre, 2=Post
+            modeParam->beginChangeGesture();
+            modeParam->setValueNotifyingHost (modeParam->convertTo0to1 ((float) newMode));
+            modeParam->endChangeGesture();
+            syncButtonState();
+        });
 }
 
 void LowcutPanel::setSpectrumSource (SpectrumSource* source)
@@ -49,6 +96,9 @@ void LowcutPanel::setSpectrumSource (SpectrumSource* source)
 
 void LowcutPanel::timerCallback()
 {
+    // Keep button text in sync with parameter (e.g. automation, preset changes).
+    syncButtonState();
+
     if (spectrumSource != nullptr && spectrumSource->pullSpectrum (spectrumMags))
     {
         hasSpectrumData = true;

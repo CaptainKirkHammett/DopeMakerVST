@@ -9,15 +9,17 @@ class HighcutPanel : public juce::Component,
 {
 public:
     explicit HighcutPanel (juce::AudioProcessorValueTreeState& apvts);
+    ~HighcutPanel() override;
     void paint   (juce::Graphics&) override;
     void resized () override;
 
-    // Call once from PluginEditor after construction.
     void setSpectrumSource (SpectrumSource* source);
 
 private:
+    juce::AudioProcessorValueTreeState& apvts;
+
     juce::ToggleButton enableButton { "Highcut" };
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> enableAttach;
+    juce::RangedAudioParameter* modeParam { nullptr };
 
     juce::Label  freqLabel  { {}, "Freq" };
     juce::Slider freqSlider;
@@ -35,4 +37,6 @@ private:
 
     void timerCallback() override;
     void drawSpectrum (juce::Graphics&, juce::Rectangle<float> vb) const;
+    void showModeMenu();
+    void syncButtonState();
 };

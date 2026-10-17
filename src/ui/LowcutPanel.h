@@ -9,14 +9,17 @@ class LowcutPanel : public juce::Component,
 {
 public:
     explicit LowcutPanel (juce::AudioProcessorValueTreeState& apvts);
+    ~LowcutPanel() override;
     void paint   (juce::Graphics&) override;
     void resized () override;
 
     void setSpectrumSource (SpectrumSource* source);
 
 private:
+    juce::AudioProcessorValueTreeState& apvts;
+
     juce::ToggleButton enableButton { "Lowcut" };
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> enableAttach;
+    juce::RangedAudioParameter* modeParam { nullptr };
 
     juce::Label  freqLabel  { {}, "Freq" };
     juce::Slider freqSlider;
@@ -34,4 +37,6 @@ private:
 
     void timerCallback() override;
     void drawSpectrum (juce::Graphics&, juce::Rectangle<float> vb) const;
+    void showModeMenu();
+    void syncButtonState();
 };

@@ -147,8 +147,10 @@ private:
     std::unique_ptr<SamplerEngine> engine;
     FilterProcessor      filterProc;
     DistortionProcessor  distProc;
-    ToneFilterProcessor  highcutProc;
-    ToneFilterProcessor  lowcutProc;
+    ToneFilterProcessor  highcutProc;      // Post-mode highcut (end of FX chain)
+    ToneFilterProcessor  highcutPreProc;   // Pre-mode highcut (after engine render)
+    ToneFilterProcessor  lowcutProc;      // Post-mode lowcut (end of FX chain)
+    ToneFilterProcessor  lowcutPreProc;   // Pre-mode lowcut (after engine render)
     ClipProcessor        clipProc;
     LfoProcessor        lfo;
     LfoProcessor        velLfo;
@@ -175,8 +177,10 @@ private:
     juce::SmoothedValue<float> phaserEnableSmoothed  { 0.0f };
     juce::SmoothedValue<float> reverbEnableSmoothed  { 0.0f };
     juce::SmoothedValue<float> delayEnableSmoothed   { 0.0f };
-    juce::SmoothedValue<float> highcutEnableSmoothed { 0.0f };
-    juce::SmoothedValue<float> lowcutEnableSmoothed  { 0.0f };
+    juce::SmoothedValue<float> highcutPreSmoothed   { 0.0f };
+    juce::SmoothedValue<float> highcutPostSmoothed  { 0.0f };
+    juce::SmoothedValue<float> lowcutPreSmoothed   { 0.0f };
+    juce::SmoothedValue<float> lowcutPostSmoothed  { 0.0f };
     juce::SmoothedValue<float> clipEnableSmoothed    { 0.0f };
     juce::SmoothedValue<float> suppressorEnableSmoothed { 0.0f };
 

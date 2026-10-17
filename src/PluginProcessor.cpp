@@ -538,8 +538,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f));
 
     // --- Highcut (LP) ---
-    params.push_back (std::make_unique<juce::AudioParameterBool> (
-        ParamIDs::highcutEnabled, "Highcut Enable", false));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        ParamIDs::highcutMode, "Highcut Mode",
+        juce::StringArray { "Off", "Pre", "Post" }, 0));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::highcutFreq, "Highcut Frequency",
         juce::NormalisableRange<float> (200.0f, 20000.0f, 0.0f, 0.25f), 8000.0f));
@@ -554,8 +555,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         }));
 
     // --- Lowcut (HP) ---
-    params.push_back (std::make_unique<juce::AudioParameterBool> (
-        ParamIDs::lowcutEnabled, "Lowcut Enable", false));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        ParamIDs::lowcutMode, "Lowcut Mode",
+        juce::StringArray { "Off", "Pre", "Post" }, 0));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::lowcutFreq, "Lowcut Frequency",
         juce::NormalisableRange<float> (20.0f, 2000.0f, 0.0f, 0.25f), 80.0f));
@@ -745,8 +747,10 @@ void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     phaserEnableSmoothed .reset (sampleRate, kEnableRampSec);
     reverbEnableSmoothed .reset (sampleRate, kEnableRampSec);
     delayEnableSmoothed  .reset (sampleRate, kEnableRampSec);
-    highcutEnableSmoothed.reset (sampleRate, kEnableRampSec);
-    lowcutEnableSmoothed .reset (sampleRate, kEnableRampSec);
+    highcutPreSmoothed   .reset (sampleRate, kEnableRampSec);
+    highcutPostSmoothed  .reset (sampleRate, kEnableRampSec);
+    lowcutPreSmoothed    .reset (sampleRate, kEnableRampSec);
+    lowcutPostSmoothed   .reset (sampleRate, kEnableRampSec);
     clipEnableSmoothed   .reset (sampleRate, kEnableRampSec);
 
     filterEnableSmoothed .setCurrentAndTargetValue (apvts.getRawParameterValue (ParamIDs::filterEnabled)->load()  > 0.5f ? 1.0f : 0.0f);
@@ -755,8 +759,16 @@ void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     phaserEnableSmoothed .setCurrentAndTargetValue (apvts.getRawParameterValue (ParamIDs::phaserEnabled)->load()  > 0.5f ? 1.0f : 0.0f);
     reverbEnableSmoothed .setCurrentAndTargetValue (apvts.getRawParameterValue (ParamIDs::reverbEnabled)->load()  > 0.5f ? 1.0f : 0.0f);
     delayEnableSmoothed  .setCurrentAndTargetValue (apvts.getRawParameterValue (ParamIDs::delayEnabled)->load()   > 0.5f ? 1.0f : 0.0f);
-    highcutEnableSmoothed.setCurrentAndTargetValue (apvts.getRawParameterValue (ParamIDs::highcutEnabled)->load() > 0.5f ? 1.0f : 0.0f);
-    lowcutEnableSmoothed .setCurrentAndTargetValue (apvts.getRawParameterValue (ParamIDs::lowcutEnabled)->load()  > 0.5f ? 1.0f : 0.0f);
+    {
+        const int hcMode = (int) apvts.getRawParameterValue (ParamIDs::highcutMode)->load();
+        highcutPreSmoothed .setCurrentAndTargetValue (hcMode == 1 ? 1.0f : 0.0f);
+        highcutPostSmoothed.setCurrentAndTargetValue (hcMode == 2 ? 1.0f : 0.0f);
+    }
+    {
+        const int lcMode = (int) apvts.getRawParameterValue (ParamIDs::lowcutMode)->load();
+        lowcutPreSmoothed .setCurrentAndTargetValue (lcMode == 1 ? 1.0f : 0.0f);
+        lowcutPostSmoothed.setCurrentAndTargetValue (lcMode == 2 ? 1.0f : 0.0f);
+    }
     clipEnableSmoothed   .setCurrentAndTargetValue (apvts.getRawParameterValue (ParamIDs::clipEnabled)->load()    > 0.5f ? 1.0f : 0.0f);
 
     suppressorEnableSmoothed.reset (sampleRate, kEnableRampSec);
@@ -774,7 +786,9 @@ void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     reverbProc.prepare   (spec);
     delayProc.prepare    (spec);
     highcutProc.prepare  (spec);
+    highcutPreProc.prepare (spec);
     lowcutProc.prepare   (spec);
+    lowcutPreProc.prepare (spec);
     lowcutSpectrumSource.setSampleRate (sampleRate);
     clipProc.prepare       (spec);
     suppressorProc.prepare (spec);
@@ -1023,6 +1037,82 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     // Render voices.
     engine->renderNextBlock (buffer, midiMessages, 0, buffer.getNumSamples());
+
+    // Lowcut/Highcut mode: 0=Off, 1=Pre, 2=Post.
+    const int lowcutMode  = (int) apvts.getRawParameterValue (ParamIDs::lowcutMode)->load();
+    const int highcutMode = (int) apvts.getRawParameterValue (ParamIDs::highcutMode)->load();
+
+    // Highcut (LP) — Pre mode: applied right after engine render, before normalize.
+    {
+        highcutPreSmoothed.setTargetValue (highcutMode == 1 ? 1.0f : 0.0f);
+        const bool smoothing = highcutPreSmoothed.isSmoothing();
+        const bool active    = smoothing || highcutPreSmoothed.getCurrentValue() > 0.5f;
+
+        if (active)
+        {
+            highcutPreProc.setParameters (true,
+                apvts.getRawParameterValue (ParamIDs::highcutFreq)->load(),
+                apvts.getRawParameterValue (ParamIDs::highcutAmt)->load());
+
+            if (smoothing)
+            {
+                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                    fxDryBuffer.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
+            }
+
+            juce::dsp::AudioBlock<float> hcPreBlock (buffer);
+            juce::dsp::ProcessContextReplacing<float> hcPreCtx (hcPreBlock);
+            highcutPreProc.process (hcPreCtx);
+
+            if (smoothing)
+            {
+                for (int s = 0; s < buffer.getNumSamples(); ++s)
+                {
+                    const float wet = highcutPreSmoothed.getNextValue();
+                    const float dry = 1.0f - wet;
+                    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                        buffer.getWritePointer (ch)[s] = buffer.getReadPointer (ch)[s] * wet
+                                                       + fxDryBuffer.getReadPointer (ch)[s] * dry;
+                }
+            }
+        }
+    }
+
+    // Lowcut (HP) — Pre mode: applied right after engine render, before normalize.
+    {
+        lowcutPreSmoothed.setTargetValue (lowcutMode == 1 ? 1.0f : 0.0f);
+        const bool smoothing = lowcutPreSmoothed.isSmoothing();
+        const bool active    = smoothing || lowcutPreSmoothed.getCurrentValue() > 0.5f;
+
+        if (active)
+        {
+            lowcutPreProc.setParameters (false,
+                apvts.getRawParameterValue (ParamIDs::lowcutFreq)->load(),
+                apvts.getRawParameterValue (ParamIDs::lowcutAmt)->load());
+
+            if (smoothing)
+            {
+                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                    fxDryBuffer.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
+            }
+
+            juce::dsp::AudioBlock<float> preBlock (buffer);
+            juce::dsp::ProcessContextReplacing<float> preCtx (preBlock);
+            lowcutPreProc.process (preCtx);
+
+            if (smoothing)
+            {
+                for (int s = 0; s < buffer.getNumSamples(); ++s)
+                {
+                    const float wet = lowcutPreSmoothed.getNextValue();
+                    const float dry = 1.0f - wet;
+                    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                        buffer.getWritePointer (ch)[s] = buffer.getReadPointer (ch)[s] * wet
+                                                       + fxDryBuffer.getReadPointer (ch)[s] * dry;
+                }
+            }
+        }
+    }
 
     // Peak normalize — smoothed toggle so enabling/disabling is click-free.
     {
@@ -1565,12 +1655,11 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // Highcut (LP) — sits right before clip, after sidechain.
+    // Highcut (LP) — Post mode: sits right before clip, after sidechain.
     {
-        highcutEnableSmoothed.setTargetValue (
-            apvts.getRawParameterValue (ParamIDs::highcutEnabled)->load() > 0.5f ? 1.0f : 0.0f);
-        const bool smoothing = highcutEnableSmoothed.isSmoothing();
-        const bool active    = smoothing || highcutEnableSmoothed.getCurrentValue() > 0.5f;
+        highcutPostSmoothed.setTargetValue (highcutMode == 2 ? 1.0f : 0.0f);
+        const bool smoothing = highcutPostSmoothed.isSmoothing();
+        const bool active    = smoothing || highcutPostSmoothed.getCurrentValue() > 0.5f;
 
         if (active)
         {
@@ -1590,7 +1679,7 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             {
                 for (int s = 0; s < buffer.getNumSamples(); ++s)
                 {
-                    const float wet = highcutEnableSmoothed.getNextValue();
+                    const float wet = highcutPostSmoothed.getNextValue();
                     const float dry = 1.0f - wet;
                     for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
                         buffer.getWritePointer (ch)[s] = buffer.getReadPointer (ch)[s] * wet
@@ -1600,12 +1689,11 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // Lowcut (HP) — sits right after highcut, before clip.
+    // Lowcut (HP) — Post mode: sits right after highcut, before clip.
     {
-        lowcutEnableSmoothed.setTargetValue (
-            apvts.getRawParameterValue (ParamIDs::lowcutEnabled)->load() > 0.5f ? 1.0f : 0.0f);
-        const bool smoothing = lowcutEnableSmoothed.isSmoothing();
-        const bool active    = smoothing || lowcutEnableSmoothed.getCurrentValue() > 0.5f;
+        lowcutPostSmoothed.setTargetValue (lowcutMode == 2 ? 1.0f : 0.0f);
+        const bool smoothing = lowcutPostSmoothed.isSmoothing();
+        const bool active    = smoothing || lowcutPostSmoothed.getCurrentValue() > 0.5f;
 
         if (active)
         {
@@ -1625,7 +1713,7 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             {
                 for (int s = 0; s < buffer.getNumSamples(); ++s)
                 {
-                    const float wet = lowcutEnableSmoothed.getNextValue();
+                    const float wet = lowcutPostSmoothed.getNextValue();
                     const float dry = 1.0f - wet;
                     for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
                         buffer.getWritePointer (ch)[s] = buffer.getReadPointer (ch)[s] * wet
@@ -1843,7 +1931,9 @@ void PluginProcessor::flushAllDspState()
     reverbProc.reset();
     delayProc.reset();
     highcutProc.reset();
+    highcutPreProc.reset();
     lowcutProc.reset();
+    lowcutPreProc.reset();
     clipProc.reset();
     stereoProc.reset();
     limiterProc.reset();
@@ -1879,8 +1969,16 @@ void PluginProcessor::flushAllDspState()
     snapEnable (phaserEnableSmoothed,      ParamIDs::phaserEnabled);
     snapEnable (reverbEnableSmoothed,      ParamIDs::reverbEnabled);
     snapEnable (delayEnableSmoothed,       ParamIDs::delayEnabled);
-    snapEnable (highcutEnableSmoothed,     ParamIDs::highcutEnabled);
-    snapEnable (lowcutEnableSmoothed,      ParamIDs::lowcutEnabled);
+    {
+        const int hcMode = (int) apvts.getRawParameterValue (ParamIDs::highcutMode)->load();
+        highcutPreSmoothed .setCurrentAndTargetValue (hcMode == 1 ? 1.0f : 0.0f);
+        highcutPostSmoothed.setCurrentAndTargetValue (hcMode == 2 ? 1.0f : 0.0f);
+    }
+    {
+        const int lcMode = (int) apvts.getRawParameterValue (ParamIDs::lowcutMode)->load();
+        lowcutPreSmoothed .setCurrentAndTargetValue (lcMode == 1 ? 1.0f : 0.0f);
+        lowcutPostSmoothed.setCurrentAndTargetValue (lcMode == 2 ? 1.0f : 0.0f);
+    }
     snapEnable (clipEnableSmoothed,        ParamIDs::clipEnabled);
     snapEnable (suppressorEnableSmoothed,  ParamIDs::suppressorEnabled);
 
