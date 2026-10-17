@@ -16,6 +16,13 @@ PresetManager::PresetManager (juce::AudioProcessorValueTreeState& a)
 
     getBankDirectory().createDirectory();
     getSamplesDirectory().createDirectory();
+
+    // macOS: copy factory presets from system-wide install location to user location.
+    // The .pkg installer writes to /Library/Application Support/ (no user detection needed).
+    // On first load we copy anything missing into ~/Library/Application Support/.
+   #if JUCE_MAC
+    copySystemPresetsIfNeeded();
+   #endif
 }
 
 juce::File PresetManager::getPresetsRoot()
@@ -211,3 +218,40 @@ juce::String PresetManager::sanitizeFileName (const juce::String& name)
     }
     return safe.trim();
 }
+
+#if JUCE_MAC
+void PresetManager::copySystemPresetsIfNeeded()
+{
+    // System-wide location where the .pkg installer writes factory presets.
+    auto systemBank = juce::File ("/Library/Application Support/DopeMakerVST/Presets")
+                          .getChildFile (kDefaultBank);
+
+    if (! systemBank.isDirectory())
+        return;
+
+    auto userBank    = getPresetsRoot().getChildFile (kDefaultBank);
+    auto userSamples = userBank.getChildFile (kSamplesFolder);
+    userBank.createDirectory();
+    userSamples.createDirectory();
+
+    // Copy presets (don't overwrite existing).
+    for (auto& f : systemBank.findChildFiles (juce::File::findFiles, false, "*.dmpreset"))
+    {
+        auto dest = userBank.getChildFile (f.getFileName());
+        if (! dest.exists())
+            f.copyFileTo (dest);
+    }
+
+    // Copy samples (don't overwrite existing).
+    auto systemSamples = systemBank.getChildFile (kSamplesFolder);
+    if (systemSamples.isDirectory())
+    {
+        for (auto& f : systemSamples.findChildFiles (juce::File::findFiles, false, "*.wav"))
+        {
+            auto dest = userSamples.getChildFile (f.getFileName());
+            if (! dest.exists())
+                f.copyFileTo (dest);
+        }
+    }
+}
+#endif
