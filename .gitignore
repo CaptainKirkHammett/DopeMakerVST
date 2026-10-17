@@ -22,8 +22,6 @@ out/
 Thumbs.db
 .DS_Store
 
-# Sample sounds (large binary files)
-samplesounds/
 
 # Compiled objects
 *.o
