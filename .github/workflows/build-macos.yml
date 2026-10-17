@@ -27,6 +27,11 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      - name: Codesign plugins (ad-hoc)
+        run: |
+          codesign --force --deep --sign - "build/SuomiSampler_artefacts/Release/VST3/Dope Maker.vst3"
+          codesign --force --deep --sign - "build/SuomiSampler_artefacts/Release/AU/Dope Maker.component"
+
       - name: List artefacts
         run: find build -name "*.vst3" -o -name "*.component" | head -20
 
