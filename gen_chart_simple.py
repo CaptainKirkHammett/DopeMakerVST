@@ -121,6 +121,8 @@ box(y, 'Voice Mix Sum', 'engine');       y += BH + GAP + 6
 y = hdr(y, 'PRE-FX')
 arr(y - 2, y + 3)
 
+box(y, 'Highcut (Pre)', 'optional');      y += BH + GAP; arr(y - GAP, y)
+box(y, 'Lowcut (Pre)', 'optional');      y += BH + GAP; arr(y - GAP, y)
 box(y, 'Pre-Gain', 'always');            y += BH + GAP; arr(y - GAP, y)
 box(y, 'Normalize', 'optional');         y += BH + GAP; arr(y - GAP, y)
 box(y, 'Granulizer', 'optional');        y += BH + GAP; arr(y - GAP, y)
@@ -143,8 +145,8 @@ box(y, 'Phaser', 'optional');            y += BH + GAP; arr(y - GAP, y)
 box(y, 'Reverb', 'optional');            y += BH + GAP; arr(y - GAP, y)
 box(y, 'Ping-Pong Delay', 'optional');   y += BH + GAP; arr(y - GAP, y)
 box(y, 'Sidechain \u2014 Post-FX', 'optional'); y += BH + GAP; arr(y - GAP, y)
-box(y, 'Highcut', 'optional');           y += BH + GAP; arr(y - GAP, y)
-box(y, 'Lowcut', 'optional');            y += BH + GAP; arr(y - GAP, y)
+box(y, 'Highcut (Post)', 'optional');    y += BH + GAP; arr(y - GAP, y)
+box(y, 'Lowcut (Post)', 'optional');     y += BH + GAP; arr(y - GAP, y)
 box(y, 'Clip', 'optional');              y += BH + GAP; arr(y - GAP, y)
 box(y, 'AutoEQ', 'optional');            y += BH + GAP + 6
 
