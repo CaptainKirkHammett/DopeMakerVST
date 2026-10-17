@@ -75,5 +75,9 @@ private:
     juce::File getPresetFile (const juce::String& presetName) const;
     static juce::String sanitizeFileName (const juce::String& name);
 
+   #if JUCE_MAC
+    void copySystemPresetsIfNeeded();
+   #endif
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PresetManager)
 };
