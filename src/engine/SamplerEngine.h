@@ -25,6 +25,14 @@ public:
     // Ownership of SampleData transfers to engine.
     void setSampleData (std::shared_ptr<SampleData> newSample);
 
+    // Returns a copy of the shared sample pointer.
+    // Safe to call from the message thread; the returned shared_ptr keeps data alive.
+    std::shared_ptr<SampleData> getSampleData()
+    {
+        juce::SpinLock::ScopedLockType lock (sampleLock);
+        return currentSample;
+    }
+
     // Main audio render entry point; processes MIDI and renders all active voices.
     void renderNextBlock (juce::AudioBuffer<float>& outputBuffer,
                           juce::MidiBuffer& midiBuffer,

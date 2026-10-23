@@ -243,6 +243,7 @@ private:
     juce::Label        titleLabel;
     juce::Label        betaLabel;
     LogoButton         logoButton;
+    juce::Label        kvrLabel;
     juce::Label        contactLabel;
     juce::Label        donateLabel;
     juce::ToggleButton bqButton          { "BQ" };

@@ -6,6 +6,10 @@
 
 #include "WaveformMarker.h"
 
+#include <juce_core/juce_core.h>
+#include <memory>
+#include <functional>
+
 class SamplerEngine;        // forward declaration — full type included in .cpp
 class GranulizerProcessor;  // forward declaration
 
@@ -67,7 +71,8 @@ private:
 
     // Transparent overlay drawn on top of the markers; paints the filename badge
     // and the normalize toggle.  Added last so it renders above the draggable markers.
-    struct BadgeOverlay : public juce::Component
+    struct BadgeOverlay : public juce::Component,
+                          public juce::TooltipClient
     {
         explicit BadgeOverlay (WaveformDisplay& o) : owner (o)
         {
@@ -77,8 +82,15 @@ private:
         void paint (juce::Graphics&) override;
         void mouseUp (const juce::MouseEvent&) override;
         bool hitTest (int x, int y) override;
+        juce::String getTooltip() override;
         juce::Rectangle<int> getBadgeBounds() const;
         juce::Rectangle<int> getNormBadgeBounds() const;
+        juce::Rectangle<int> getTuneBadgeBounds() const;
+
+        bool         tuneInProgress     { false };
+        juce::String tuneResultText;
+        int          tuneResultCountdown { 0 };   // timer ticks remaining for result flash
+
         WaveformDisplay& owner;
     };
 
@@ -158,4 +170,16 @@ private:
 
     // Cached normalize state — repaint waveform when toggled.
     bool cachedNormEnabled { false };
+
+    // ── Pitch detection (auto-tune) ──────────────────────────────────────────
+    class PitchDetectionJob;
+    class TuneResultOverlay;
+    std::unique_ptr<PitchDetectionJob> pitchJob;
+    std::unique_ptr<TuneResultOverlay> tuneOverlay;
+    int previousRootNote { 48 };   // saved before tuning so "No way!" can revert
+    void launchPitchDetection();
+    void onPitchDetected (int midiNote, float freqHz, float confidence);
+    void onPitchDetectionFailed();
+    void showTuneOverlay (const juce::String& noteName, bool success, int newNote, float confidence);
+    void dismissTuneOverlay (bool revert);
 };

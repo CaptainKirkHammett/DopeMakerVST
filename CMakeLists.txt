@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(SuomiSampler VERSION 0.2780.0.4)
+project(SuomiSampler VERSION 0.2780.0.5)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -49,6 +49,7 @@ target_sources(SuomiSampler PRIVATE
     src/dsp/PingPongDelayProcessor.cpp
     src/dsp/LfoProcessor.cpp
     src/dsp/GateController.cpp
+    src/dsp/PitchDetector.cpp
     src/dsp/EnvelopeFollower.cpp
     src/dsp/ArpeggiatorProcessor.cpp
     src/dsp/ClipProcessor.cpp

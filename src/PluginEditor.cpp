@@ -55,7 +55,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     titleLabel.addMouseListener (this, false);
     uiRoot.addAndMakeVisible (titleLabel);
 
-    betaLabel.setText ("Beta v0.2780.0.4", juce::dontSendNotification);
+    betaLabel.setText ("Beta v0.2780.0.5", juce::dontSendNotification);
     betaLabel.setFont (juce::Font (16.0f, juce::Font::italic));
     betaLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff).withAlpha (0.7f));
     betaLabel.setJustificationType (juce::Justification::topLeft);
@@ -64,6 +64,15 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     logoButton.setTooltip ("Enter The DOPE TOWN");
     logoButton.addMouseListener (this, false);
     uiRoot.addAndMakeVisible (logoButton);
+
+    kvrLabel.setText ("KVR", juce::dontSendNotification);
+    kvrLabel.setFont (juce::Font (16.0f, juce::Font::italic));
+    kvrLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff).withAlpha (0.7f));
+    kvrLabel.setJustificationType (juce::Justification::centredRight);
+    kvrLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    kvrLabel.setTooltip ("Dope Maker on KVR Audio");
+    kvrLabel.addMouseListener (this, false);
+    uiRoot.addAndMakeVisible (kvrLabel);
 
     contactLabel.setText ("Contact", juce::dontSendNotification);
     contactLabel.setFont (juce::Font (16.0f, juce::Font::italic));
@@ -338,6 +347,37 @@ PluginEditor::PluginEditor (PluginProcessor& p)
 
     uiRoot.addChildComponent (signalPathOverlay);
 
+    // Auto-select the best UI scale to fit the user's screen at startup.
+    {
+        constexpr float kNativeW = 1050.0f;
+        constexpr float kNativeH = 1108.0f;
+        constexpr float kMargin  = 0.92f;   // leave 8 % margin for taskbar / DAW chrome
+        constexpr float kScales[] = { 1.0f, 0.85f, 0.75f, 0.60f, 0.5f };
+
+        auto display = juce::Desktop::getInstance().getDisplays()
+                           .getDisplayForPoint (getBounds().getCentre());
+        if (display != nullptr)
+        {
+            const auto screenH = static_cast<float> (display->userArea.getHeight());
+            const auto screenW = static_cast<float> (display->userArea.getWidth());
+
+            float bestScale = kScales[sizeof (kScales) / sizeof (kScales[0]) - 1];
+            for (float s : kScales)
+            {
+                if (kNativeW * s <= screenW * kMargin
+                    && kNativeH * s <= screenH * kMargin)
+                {
+                    bestScale = s;
+                    break;
+                }
+            }
+
+            if (bestScale < 1.0f)
+                setSize (juce::roundToInt (kNativeW * bestScale),
+                         juce::roundToInt (kNativeH * bestScale));
+        }
+    }
+
     // One-shot timer: catches DAWs that call setStateInformation after
     // createEditor, so the preset name and sample show up even then.
     startTimer (200);
@@ -376,7 +416,11 @@ void PluginEditor::timerCallback()
 
 void PluginEditor::mouseUp (const juce::MouseEvent& e)
 {
-    if (e.eventComponent == &contactLabel)
+    if (e.eventComponent == &kvrLabel)
+    {
+        juce::URL ("https://www.kvraudio.com/product/dope-maker-by-dope-science").launchInDefaultBrowser();
+    }
+    else if (e.eventComponent == &contactLabel)
     {
         // Built from parts at runtime to avoid a plain-text email in the binary.
         juce::String addr;
@@ -452,8 +496,9 @@ void PluginEditor::resized()
         bqButton.setBounds (bqCol.removeFromTop (btnH).reduced (3, 2));
     }
     logoButton.setBounds  (header.reduced (4));
-    // "Contact" at the same vertical position and font size as betaLabel, right-aligned next to logo.
-    contactLabel.setBounds (logoButton.getRight() - 80, betaLabel.getY(), 75, 18);
+    // KVR, Contact, Donate links — right-aligned next to logo, same row as betaLabel.
+    kvrLabel.setBounds (logoButton.getRight() - 115, betaLabel.getY(), 40, 18);
+    contactLabel.setBounds (kvrLabel.getRight() - 5, betaLabel.getY(), 75, 18);
     donateLabel.setBounds (contactLabel.getRight() - 10, betaLabel.getY(), 55, 18);
 
     // ── Waveform strip ────────────────────────────────────────────────────────

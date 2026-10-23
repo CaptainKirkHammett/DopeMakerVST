@@ -126,6 +126,7 @@ namespace ParamIDs
         return std::string (buf);
     }
     inline constexpr const char* gateVolumeAmt  = "gateVolumeAmt";
+    inline constexpr const char* gateRouting    = "gateRouting";
     inline constexpr const char* envFilterAmt       = "envFilterAmt";
     inline constexpr const char* envDistAmt         = "envDistAmt";
     inline constexpr const char* envFlangerAmt      = "envFlangerAmt";
