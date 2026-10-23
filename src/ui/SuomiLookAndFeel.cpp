@@ -16,14 +16,21 @@ const juce::Colour SuomiLookAndFeel::kModIndicatorFx { 0xffc02040 }; // vivid wi
 const juce::Colour SuomiLookAndFeel::kYellow     { 0xffcc9900 };   // warm golden yellow
 const juce::Colour SuomiLookAndFeel::kYellowDark  { 0xff5a4200 };   // dark amber
 
+// macOS renders fonts ~15 % larger than Windows at the same point size.
+#if JUCE_MAC
+static constexpr float kFontScale = 0.85f;
+#else
+static constexpr float kFontScale = 1.0f;
+#endif
+
 juce::Font SuomiLookAndFeel::shareFont (float size) const
 {
-    return juce::Font (shareTechMono).withHeight (size);
+    return juce::Font (shareTechMono).withHeight (size * kFontScale);
 }
 
 juce::Font SuomiLookAndFeel::shareFontBold (float size) const
 {
-    return juce::Font (shareTechMonoBold).withHeight (size);
+    return juce::Font (shareTechMonoBold).withHeight (size * kFontScale);
 }
 
 SuomiLookAndFeel::SuomiLookAndFeel()

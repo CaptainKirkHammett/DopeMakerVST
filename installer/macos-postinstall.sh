@@ -21,4 +21,8 @@ done
 
 # Clean up
 rm -rf "$PRESET_SRC"
+
+# Reset AU cache so the DAW picks up the updated component
+killall -9 AudioComponentRegistrar 2>/dev/null || true
+
 exit 0
