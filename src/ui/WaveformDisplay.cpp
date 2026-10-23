@@ -1123,7 +1123,7 @@ void WaveformDisplay::onPitchDetected (int midiNote, float /*freqHz*/, float con
         param->setValueNotifyingHost (normVal);
     }
 
-    auto noteName = juce::MidiMessage::getMidiNoteName (adjustedNote, true, true, 3);
+    auto noteName = juce::MidiMessage::getMidiNoteName (adjustedNote, true, false, 3);
 
     badgeOverlay.tuneInProgress = false;
     badgeOverlay.tuneResultText = noteName;
