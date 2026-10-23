@@ -18,7 +18,7 @@ const juce::Colour SuomiLookAndFeel::kYellowDark  { 0xff5a4200 };   // dark ambe
 
 // macOS renders fonts ~15 % larger than Windows at the same point size.
 #if JUCE_MAC
-static constexpr float kFontScale = 0.85f;
+static constexpr float kFontScale = 0.78f;
 #else
 static constexpr float kFontScale = 1.0f;
 #endif

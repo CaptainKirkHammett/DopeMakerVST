@@ -67,29 +67,32 @@ PluginEditor::PluginEditor (PluginProcessor& p)
 
     kvrLabel.setText ("KVR", juce::dontSendNotification);
     kvrLabel.setFont (juce::Font (16.0f, juce::Font::italic));
-    kvrLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff).withAlpha (0.7f));
-    kvrLabel.setJustificationType (juce::Justification::centredRight);
+    kvrLabel.setColour (juce::Label::textColourId, juce::Colour (0xff280044));
+    kvrLabel.setJustificationType (juce::Justification::centred);
     kvrLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
     kvrLabel.setTooltip ("Dope Maker on KVR Audio");
     kvrLabel.addMouseListener (this, false);
+    kvrLabel.setAlwaysOnTop (true);
     uiRoot.addAndMakeVisible (kvrLabel);
 
     contactLabel.setText ("Contact", juce::dontSendNotification);
     contactLabel.setFont (juce::Font (16.0f, juce::Font::italic));
-    contactLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff).withAlpha (0.7f));
-    contactLabel.setJustificationType (juce::Justification::centredRight);
+    contactLabel.setColour (juce::Label::textColourId, juce::Colour (0xff280044));
+    contactLabel.setJustificationType (juce::Justification::centred);
     contactLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
     contactLabel.setTooltip ("Send EMail");
     contactLabel.addMouseListener (this, false);
+    contactLabel.setAlwaysOnTop (true);
     uiRoot.addAndMakeVisible (contactLabel);
 
     donateLabel.setText ("Donate", juce::dontSendNotification);
     donateLabel.setFont (juce::Font (16.0f, juce::Font::italic));
-    donateLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff).withAlpha (0.7f));
-    donateLabel.setJustificationType (juce::Justification::centredRight);
+    donateLabel.setColour (juce::Label::textColourId, juce::Colour (0xff280044));
+    donateLabel.setJustificationType (juce::Justification::centred);
     donateLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
     donateLabel.setTooltip ("If you find this VST fun, you could always Paypal me few bucks RIGHT!?");
     donateLabel.addMouseListener (this, false);
+    donateLabel.setAlwaysOnTop (true);
     uiRoot.addAndMakeVisible (donateLabel);
 
     bqButton.getProperties().set ("fxButton", true);
@@ -414,6 +417,26 @@ void PluginEditor::timerCallback()
     }
 }
 
+void PluginEditor::mouseEnter (const juce::MouseEvent& e)
+{
+    if (e.eventComponent == &kvrLabel || e.eventComponent == &contactLabel
+        || e.eventComponent == &donateLabel)
+    {
+        static_cast<juce::Label*> (e.eventComponent)
+            ->setColour (juce::Label::textColourId, juce::Colours::white);
+    }
+}
+
+void PluginEditor::mouseExit (const juce::MouseEvent& e)
+{
+    if (e.eventComponent == &kvrLabel || e.eventComponent == &contactLabel
+        || e.eventComponent == &donateLabel)
+    {
+        static_cast<juce::Label*> (e.eventComponent)
+            ->setColour (juce::Label::textColourId, juce::Colour (0xff280044));
+    }
+}
+
 void PluginEditor::mouseUp (const juce::MouseEvent& e)
 {
     if (e.eventComponent == &kvrLabel)
@@ -495,11 +518,18 @@ void PluginEditor::resized()
         auto bqCol = header.removeFromRight (46);
         bqButton.setBounds (bqCol.removeFromTop (btnH).reduced (3, 2));
     }
-    logoButton.setBounds  (header.reduced (4));
-    // KVR, Contact, Donate links — right-aligned next to logo, same row as betaLabel.
-    kvrLabel.setBounds (logoButton.getRight() - 115, betaLabel.getY(), 40, 18);
-    contactLabel.setBounds (kvrLabel.getRight() - 5, betaLabel.getY(), 75, 18);
-    donateLabel.setBounds (contactLabel.getRight() - 10, betaLabel.getY(), 55, 18);
+    logoButton.setBounds  (header.reduced (4).translated (-20, 0));
+    // KVR, Contact, Donate links — right-to-left from INIT button's left edge.
+    {
+        const int linkY = betaLabel.getY();
+        const int linkH = 18;
+        const int gap   = 2;
+        const int kvrW  = 28, contactW = 50, donateW = 46;
+        const int rightEdge = defaultButton.getX() - 6;
+        donateLabel.setBounds  (rightEdge - donateW,                    linkY, donateW,  linkH);
+        contactLabel.setBounds (rightEdge - donateW - gap - contactW,   linkY, contactW, linkH);
+        kvrLabel.setBounds     (rightEdge - donateW - gap - contactW - gap - kvrW, linkY, kvrW, linkH);
+    }
 
     // ── Waveform strip ────────────────────────────────────────────────────────
     auto waveRow = area.removeFromTop (120);
