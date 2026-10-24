@@ -55,7 +55,7 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     titleLabel.addMouseListener (this, false);
     uiRoot.addAndMakeVisible (titleLabel);
 
-    betaLabel.setText ("Beta v0.2780.0.4", juce::dontSendNotification);
+    betaLabel.setText ("Beta v0.2780.0.5", juce::dontSendNotification);
     betaLabel.setFont (juce::Font (16.0f, juce::Font::italic));
     betaLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff).withAlpha (0.7f));
     betaLabel.setJustificationType (juce::Justification::topLeft);
@@ -65,22 +65,34 @@ PluginEditor::PluginEditor (PluginProcessor& p)
     logoButton.addMouseListener (this, false);
     uiRoot.addAndMakeVisible (logoButton);
 
+    kvrLabel.setText ("KVR", juce::dontSendNotification);
+    kvrLabel.setFont (juce::Font (16.0f, juce::Font::italic));
+    kvrLabel.setColour (juce::Label::textColourId, juce::Colour (0xff280044));
+    kvrLabel.setJustificationType (juce::Justification::centred);
+    kvrLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    kvrLabel.setTooltip ("Dope Maker on KVR Audio");
+    kvrLabel.addMouseListener (this, false);
+    kvrLabel.setAlwaysOnTop (true);
+    uiRoot.addAndMakeVisible (kvrLabel);
+
     contactLabel.setText ("Contact", juce::dontSendNotification);
     contactLabel.setFont (juce::Font (16.0f, juce::Font::italic));
-    contactLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff).withAlpha (0.7f));
-    contactLabel.setJustificationType (juce::Justification::centredRight);
+    contactLabel.setColour (juce::Label::textColourId, juce::Colour (0xff280044));
+    contactLabel.setJustificationType (juce::Justification::centred);
     contactLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
     contactLabel.setTooltip ("Send EMail");
     contactLabel.addMouseListener (this, false);
+    contactLabel.setAlwaysOnTop (true);
     uiRoot.addAndMakeVisible (contactLabel);
 
     donateLabel.setText ("Donate", juce::dontSendNotification);
     donateLabel.setFont (juce::Font (16.0f, juce::Font::italic));
-    donateLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff).withAlpha (0.7f));
-    donateLabel.setJustificationType (juce::Justification::centredRight);
+    donateLabel.setColour (juce::Label::textColourId, juce::Colour (0xff280044));
+    donateLabel.setJustificationType (juce::Justification::centred);
     donateLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
     donateLabel.setTooltip ("If you find this VST fun, you could always Paypal me few bucks RIGHT!?");
     donateLabel.addMouseListener (this, false);
+    donateLabel.setAlwaysOnTop (true);
     uiRoot.addAndMakeVisible (donateLabel);
 
     bqButton.getProperties().set ("fxButton", true);
@@ -174,6 +186,9 @@ PluginEditor::PluginEditor (PluginProcessor& p)
         waveformDisplay.setFile (f);
         presetManagerPanel.setCurrentSampleFile (f);
     };
+    waveformDisplay.onRootNoteChanged = [this] {
+        sampleControlPanel.blinkRootNoteBox();
+    };
     uiRoot.addAndMakeVisible (waveformDisplay);
 
     // If a sample was already loaded (e.g. project restored via setStateInformation
@@ -208,6 +223,8 @@ PluginEditor::PluginEditor (PluginProcessor& p)
                                       p.apvts.getRawParameterValue (ParamIDs::stutterLenLfoDepth));
     uiRoot.addAndMakeVisible (gateControllerPanel);
     gateControllerPanel.setParameterDisplay (&paramDisplay);
+    sidechainPanel.setDrawnEnvelopeTable (processor.sidechainDrawnEnvelope,
+                                          PluginProcessor::kSidechainTableSize);
     uiRoot.addAndMakeVisible (sidechainPanel);
     uiRoot.addAndMakeVisible (arpPanel);
     uiRoot.addAndMakeVisible (filterPanel);
@@ -338,6 +355,37 @@ PluginEditor::PluginEditor (PluginProcessor& p)
 
     uiRoot.addChildComponent (signalPathOverlay);
 
+    // Auto-select the best UI scale to fit the user's screen at startup.
+    {
+        constexpr float kNativeW = 1050.0f;
+        constexpr float kNativeH = 1108.0f;
+        constexpr float kMargin  = 0.92f;   // leave 8 % margin for taskbar / DAW chrome
+        constexpr float kScales[] = { 1.0f, 0.85f, 0.75f, 0.60f, 0.5f };
+
+        auto display = juce::Desktop::getInstance().getDisplays()
+                           .getDisplayForPoint (getBounds().getCentre());
+        if (display != nullptr)
+        {
+            const auto screenH = static_cast<float> (display->userArea.getHeight());
+            const auto screenW = static_cast<float> (display->userArea.getWidth());
+
+            float bestScale = kScales[sizeof (kScales) / sizeof (kScales[0]) - 1];
+            for (float s : kScales)
+            {
+                if (kNativeW * s <= screenW * kMargin
+                    && kNativeH * s <= screenH * kMargin)
+                {
+                    bestScale = s;
+                    break;
+                }
+            }
+
+            if (bestScale < 1.0f)
+                setSize (juce::roundToInt (kNativeW * bestScale),
+                         juce::roundToInt (kNativeH * bestScale));
+        }
+    }
+
     // One-shot timer: catches DAWs that call setStateInformation after
     // createEditor, so the preset name and sample show up even then.
     startTimer (200);
@@ -374,9 +422,33 @@ void PluginEditor::timerCallback()
     }
 }
 
+void PluginEditor::mouseEnter (const juce::MouseEvent& e)
+{
+    if (e.eventComponent == &kvrLabel || e.eventComponent == &contactLabel
+        || e.eventComponent == &donateLabel)
+    {
+        static_cast<juce::Label*> (e.eventComponent)
+            ->setColour (juce::Label::textColourId, juce::Colours::white);
+    }
+}
+
+void PluginEditor::mouseExit (const juce::MouseEvent& e)
+{
+    if (e.eventComponent == &kvrLabel || e.eventComponent == &contactLabel
+        || e.eventComponent == &donateLabel)
+    {
+        static_cast<juce::Label*> (e.eventComponent)
+            ->setColour (juce::Label::textColourId, juce::Colour (0xff280044));
+    }
+}
+
 void PluginEditor::mouseUp (const juce::MouseEvent& e)
 {
-    if (e.eventComponent == &contactLabel)
+    if (e.eventComponent == &kvrLabel)
+    {
+        juce::URL ("https://www.kvraudio.com/product/dope-maker-by-dope-science").launchInDefaultBrowser();
+    }
+    else if (e.eventComponent == &contactLabel)
     {
         // Built from parts at runtime to avoid a plain-text email in the binary.
         juce::String addr;
@@ -451,10 +523,18 @@ void PluginEditor::resized()
         auto bqCol = header.removeFromRight (46);
         bqButton.setBounds (bqCol.removeFromTop (btnH).reduced (3, 2));
     }
-    logoButton.setBounds  (header.reduced (4));
-    // "Contact" at the same vertical position and font size as betaLabel, right-aligned next to logo.
-    contactLabel.setBounds (logoButton.getRight() - 80, betaLabel.getY(), 75, 18);
-    donateLabel.setBounds (contactLabel.getRight() - 10, betaLabel.getY(), 55, 18);
+    logoButton.setBounds  (header.reduced (4).translated (-20, 0));
+    // KVR, Contact, Donate links — right-to-left from INIT button's left edge.
+    {
+        const int linkY = betaLabel.getY();
+        const int linkH = 18;
+        const int gap   = 2;
+        const int kvrW  = 28, contactW = 50, donateW = 46;
+        const int rightEdge = defaultButton.getX() - 6;
+        donateLabel.setBounds  (rightEdge - donateW,                    linkY, donateW,  linkH);
+        contactLabel.setBounds (rightEdge - donateW - gap - contactW,   linkY, contactW, linkH);
+        kvrLabel.setBounds     (rightEdge - donateW - gap - contactW - gap - kvrW, linkY, kvrW, linkH);
+    }
 
     // ── Waveform strip ────────────────────────────────────────────────────────
     auto waveRow = area.removeFromTop (120);

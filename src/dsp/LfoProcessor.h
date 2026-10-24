@@ -11,7 +11,7 @@ enum class LfoWaveform
 
 enum class SyncDivision
 {
-    Div1_32, Div1_16, Div1_8, Div1_8D,
+    Div1_64, Div1_32, Div1_16, Div1_8, Div1_8D,
     Div1_4, Div1_4D, Div1_2, Div1_2D,
     Div1_1, Div1_1D, Div2_1
 };

@@ -12,7 +12,7 @@
 ;   - Factory sample WAVs      -> %APPDATA%\DopeMakerVST\Presets\Fvcktory Bank\Samples\
 
 #define MyAppName      "Dope Maker"
-#define MyAppVersion   "0.2780.0.4"
+#define MyAppVersion   "0.2780.0.5"
 #define MyAppPublisher "Dope Science"
 #define MyAppURL       ""
 

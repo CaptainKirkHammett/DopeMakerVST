@@ -91,6 +91,11 @@ public:
     PhaserProcessor        phaserProc;
     GateController         gateController;
     SidechainProcessor     sidechainProc;
+
+    // Drawn sidechain envelope table — 256 gain values [0..1] for one cycle.
+    // Written by the UI thread, read by the audio thread.
+    static constexpr int kSidechainTableSize = 256;
+    float sidechainDrawnEnvelope[kSidechainTableSize];
     EnvelopeFollower       audioEnvFollower;
 
     ArpeggiatorProcessor arpProc;
@@ -186,6 +191,9 @@ private:
 
     // Shared scratch buffer for dry/wet crossfade during FX enable transitions.
     juce::AudioBuffer<float> fxDryBuffer;
+
+    // Dry signal captured before the FX chain for Sidechain "FX Only" mode.
+    juce::AudioBuffer<float> scPreFxBuffer;
 
     // Resonance suppressor — last in chain, after clip.
     ResonanceSuppressorProcessor suppressorProc;

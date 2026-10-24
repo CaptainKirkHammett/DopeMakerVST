@@ -16,14 +16,21 @@ const juce::Colour SuomiLookAndFeel::kModIndicatorFx { 0xffc02040 }; // vivid wi
 const juce::Colour SuomiLookAndFeel::kYellow     { 0xffcc9900 };   // warm golden yellow
 const juce::Colour SuomiLookAndFeel::kYellowDark  { 0xff5a4200 };   // dark amber
 
+// macOS renders fonts ~15 % larger than Windows at the same point size.
+#if JUCE_MAC
+static constexpr float kFontScale = 0.78f;
+#else
+static constexpr float kFontScale = 1.0f;
+#endif
+
 juce::Font SuomiLookAndFeel::shareFont (float size) const
 {
-    return juce::Font (shareTechMono).withHeight (size);
+    return juce::Font (shareTechMono).withHeight (size * kFontScale);
 }
 
 juce::Font SuomiLookAndFeel::shareFontBold (float size) const
 {
-    return juce::Font (shareTechMonoBold).withHeight (size);
+    return juce::Font (shareTechMonoBold).withHeight (size * kFontScale);
 }
 
 SuomiLookAndFeel::SuomiLookAndFeel()
@@ -523,13 +530,25 @@ void SuomiLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& 
     }
 
     const bool smallFont = static_cast<bool> (button.getProperties()["smallFont"]);
-    if (isFxButton)
-        g.setFont (shareFontBold (19.37f));
-    else if (smallFont)
-        g.setFont (shareFont (13.0f));
-    else
-        g.setFont (shareFont (17.60f));
-    g.drawText (button.getButtonText(), button.getLocalBounds(),
+    float fontSize;
+    bool bold;
+    if (isFxButton)      { fontSize = 19.37f; bold = true;  }
+    else if (smallFont)  { fontSize = 13.0f;  bold = false; }
+    else                 { fontSize = 17.60f; bold = false; }
+
+    const auto text   = button.getButtonText();
+    const int  pad    = 4;
+    const int  availW = button.getWidth() - pad * 2;
+    auto font = bold ? shareFontBold (fontSize) : shareFont (fontSize);
+
+    while (font.getStringWidth (text) > availW && fontSize > 9.0f)
+    {
+        fontSize -= 0.5f;
+        font = bold ? shareFontBold (fontSize) : shareFont (fontSize);
+    }
+
+    g.setFont (font);
+    g.drawText (text, button.getLocalBounds(),
                 juce::Justification::centred, false);
 }
 
@@ -555,9 +574,24 @@ void SuomiLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& butt
                                         bool /*isHighlighted*/, bool /*isDown*/)
 {
     g.setColour (juce::Colours::white);
-    g.setFont (shareFont (19.21f));
-    g.drawText (button.getButtonText(), button.getLocalBounds(),
-                juce::Justification::centred, true);
+
+    const auto text   = button.getButtonText();
+    const auto bounds = button.getLocalBounds();
+    const int  pad    = 4;   // horizontal padding
+    const int  availW = bounds.getWidth() - pad * 2;
+
+    // Start at the default size and shrink until the text fits.
+    float fontSize = 19.21f;
+    auto font = shareFont (fontSize);
+
+    while (font.getStringWidth (text) > availW && fontSize > 9.0f)
+    {
+        fontSize -= 0.5f;
+        font = shareFont (fontSize);
+    }
+
+    g.setFont (font);
+    g.drawText (text, bounds, juce::Justification::centred, true);
 }
 
 //==============================================================================

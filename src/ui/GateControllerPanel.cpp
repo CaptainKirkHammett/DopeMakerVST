@@ -27,15 +27,43 @@ GateControllerPanel::GateControllerPanel (juce::AudioProcessorValueTreeState& ap
     // ── Gate volume fader ──────────────────────────────────────────────────────
     gateFader = std::make_unique<DuckFaderButton> (apvts, ParamIDs::gateVolumeAmt, "Gate");
     gateFader->setTooltip (
-        "Step Volume Gate\n\n"
+        "Trance Gate\n\n"
         "Controls how much the step sequencer modulates the output volume. "
         "At 0% the steps have no effect on volume. At 100% the step levels "
         "fully gate the signal - steps set to zero will silence the audio.");
     addAndMakeVisible (*gateFader);
 
+    // ── Routing button ─────────────────────────────────────────────────────────
+    routeButton.setTooltip (
+        "TRANCE GATE routing\n\n"
+        "A = Pre FX (before effects chain)\n"
+        "B = Pre Reverb (after Phaser)\n"
+        "C = Post FX (after Delay)");
+    routeButton.setConnectedEdges (juce::Button::ConnectedOnLeft | juce::Button::ConnectedOnRight);
+    addAndMakeVisible (routeButton);
+    {
+        auto* param = apvtsRef.getParameter (ParamIDs::gateRouting);
+        auto updateRouteLabel = [this, param]
+        {
+            const int idx = static_cast<int> (param->convertFrom0to1 (param->getValue()));
+            static const char* labels[] = { "A", "B", "C" };
+            routeButton.setButtonText (labels[juce::jlimit (0, 2, idx)]);
+            routeButton.repaint();
+        };
+        routeButton.onClick = [param, updateRouteLabel]
+        {
+            const int cur = static_cast<int> (param->convertFrom0to1 (param->getValue()));
+            const int next = (cur + 1) % 3;
+            param->setValueNotifyingHost (param->convertTo0to1 (static_cast<float> (next)));
+            updateRouteLabel();
+        };
+        updateRouteLabel();
+    }
+
     // ── Division combo ────────────────────────────────────────────────────────
+    // 1/64 displayed first; item IDs must match the parameter choice indices (1-based).
     const juce::StringArray divNames {
-        "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1"
+        "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1"
     };
     for (int i = 0; i < divNames.size(); ++i)
         divBox.addItem (divNames[i], i + 1);
@@ -63,7 +91,7 @@ GateControllerPanel::GateControllerPanel (juce::AudioProcessorValueTreeState& ap
         stepSliders[i].setSliderStyle (juce::Slider::LinearVertical);
         stepSliders[i].setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
         // Steps 4, 12, 20, 28 (indices 3, 11, 19, 27) get a darker track channel.
-        if (i % 8 == 3)
+        if (i % 8 == 4)
             stepSliders[i].getProperties().set ("darkTrack", true);
         addAndMakeVisible (stepSliders[i]);
         stepAttachments[i] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
@@ -78,6 +106,7 @@ GateControllerPanel::GateControllerPanel (juce::AudioProcessorValueTreeState& ap
         stepCountLabel .setAlpha (a);
         stepCountSlider.setAlpha (a);
         gateFader      ->setAlpha (a);
+        routeButton    .setAlpha (a);
         divBox         .setAlpha (a);
         maxButton      .setAlpha (a);
         minButton      .setAlpha (a);
@@ -141,6 +170,13 @@ void GateControllerPanel::timerCallback()
         lastDisplayedStep = step;
         repaint();
     }
+
+    // Gray out routing button when trance gate amount is zero.
+    const float gateAmt = apvtsRef.getRawParameterValue (ParamIDs::gateVolumeAmt)->load();
+    const bool routeActive = enableButton.getToggleState() && gateAmt > 0.0f;
+    const float routeAlpha = routeActive ? 1.0f : 0.35f;
+    if (routeButton.getAlpha() != routeAlpha)
+        routeButton.setAlpha (routeAlpha);
 }
 
 void GateControllerPanel::paint (juce::Graphics& g)
@@ -231,12 +267,15 @@ void GateControllerPanel::resized()
     }
     left.removeFromTop (gap);
 
-    // Gate + Div row: gate fader button + division combo, same half-width as buttons below.
+    // Gate + Route + Div row: gate fader + routing button + division combo.
     {
         auto row = left.removeFromTop (rowH);
-        const int btnW = row.getWidth() / 2;
-        gateFader->setBounds (row.removeFromLeft (btnW));
-        divBox.setBounds     (row);
+        constexpr int routeW = 18;
+        const int divW = row.getWidth() / 2;            // 60px — unchanged
+        const int faderW = row.getWidth() - divW - routeW; // 42px
+        gateFader->setBounds   (row.removeFromLeft (faderW));
+        routeButton.setBounds  (row.removeFromLeft (routeW));
+        divBox.setBounds       (row);
     }
     left.removeFromTop (gap);
 

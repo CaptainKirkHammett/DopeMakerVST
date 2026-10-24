@@ -25,6 +25,10 @@ public:
     void prepare (double sampleRate);
     void reset   ();
 
+    // Set the drawn envelope table pointer and size.
+    // The table is owned by the caller and must outlive this processor.
+    void setDrawnEnvelope (const float* table, int tableSize);
+
     // Process the buffer in-place.  Call from the audio thread only.
     // ppqPosition: current DAW playhead in quarter notes (pass < 0 to free-run on BPM only).
     void process (juce::AudioBuffer<float>& buffer,
@@ -35,7 +39,8 @@ public:
                   float        curve,       // 0..1 — rise shape (0=slow, 0.5=linear, 1=fast)
                   float        fall01,      // 0..1 — fall span at end of cycle (0=instant, 1=full span)
                   float        mix,         // 0..1 — dry/wet
-                  double       ppqPosition = -1.0);  // DAW transport position
+                  double       ppqPosition = -1.0,  // DAW transport position
+                  bool         useDrawnEnvelope = false);
 
 private:
     double sampleRate  { 44100.0 };
@@ -47,6 +52,12 @@ private:
 
     // Evaluate the raw envelope at the current phase.
     float computeEnvelope (float preDelay01, float rise01, float curve, float fall01) const;
+
+    // Look up the drawn envelope table at the current phase.
+    float lookupDrawnEnvelope() const;
+
+    const float* drawnTable     { nullptr };
+    int          drawnTableSize { 0 };
 
     JUCE_DECLARE_NON_COPYABLE (SidechainProcessor)
 };

@@ -261,8 +261,53 @@ void SampleControlPanel::setLimiterGainReductionSource (std::atomic<float>* src)
     startTimerHz (30);
 }
 
+void SampleControlPanel::RootNoteBlinkOverlay::paint (juce::Graphics& g)
+{
+    if (highlight)
+    {
+        g.setColour (SuomiLookAndFeel::kKnobPointer.withAlpha (0.5f));
+        g.fillRoundedRectangle (getLocalBounds().toFloat(), 3.0f);
+    }
+}
+
+void SampleControlPanel::blinkRootNoteBox()
+{
+    // 5 blinks × (7 on + 7 off) = 70 ticks at 30 Hz ≈ 2.3 s.
+    rootNoteBlinkTicks = 70;
+
+    // Create a floating overlay on the top-level window so it renders
+    // above everything, including the tune-result dim layer.
+    auto* topLevel = getTopLevelComponent();
+    if (topLevel == nullptr)
+        return;
+
+    blinkOverlay = std::make_unique<RootNoteBlinkOverlay>();
+    blinkOverlay->setInterceptsMouseClicks (false, false);
+    auto boxBounds = topLevel->getLocalArea (&rootNoteBox, rootNoteBox.getLocalBounds());
+    blinkOverlay->setBounds (boxBounds.expanded (2));
+    topLevel->addAndMakeVisible (*blinkOverlay);
+    blinkOverlay->toFront (false);
+}
+
 void SampleControlPanel::timerCallback()
 {
+    // Root-note blink animation: toggle highlight every 7 ticks (~230 ms per phase).
+    if (rootNoteBlinkTicks > 0)
+    {
+        --rootNoteBlinkTicks;
+        const bool hl = ((rootNoteBlinkTicks / 7) % 2) == 1;
+
+        if (blinkOverlay != nullptr)
+        {
+            blinkOverlay->highlight = hl;
+            blinkOverlay->toFront (false);
+            blinkOverlay->repaint();
+        }
+
+        if (rootNoteBlinkTicks == 0)
+            blinkOverlay.reset();
+    }
+
     if (limiterGrSource == nullptr)
         return;
 

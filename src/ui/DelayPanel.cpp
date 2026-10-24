@@ -7,7 +7,7 @@ namespace
     void addDivItems (juce::ComboBox& box)
     {
         const juce::StringArray divNames {
-            "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1"
+            "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1"
         };
         for (int i = 0; i < divNames.size(); ++i)
             box.addItem (divNames[i], i + 1);

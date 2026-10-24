@@ -1,7 +1,157 @@
 #include "WaveformDisplay.h"
 #include "../ParameterIDs.h"
 #include "../engine/SamplerEngine.h"
+#include "../engine/SamplerVoice.h"   // SampleData
 #include "../dsp/GranulizerProcessor.h"
+#include "../dsp/PitchDetector.h"
+
+// ── PitchDetectionJob (defined early so the destructor can see the full type) ─
+// Runs single-pitch detection on a background thread.
+class WaveformDisplay::PitchDetectionJob : public juce::Thread
+{
+public:
+    PitchDetectionJob (std::shared_ptr<SampleData> sample,
+                       float startPos, float endPos,
+                       std::function<void (PitchDetector::Result)> callback)
+        : juce::Thread ("PitchDetect"),
+          sampleData (std::move (sample)),
+          start (startPos), end (endPos),
+          onComplete (std::move (callback))
+    {
+    }
+
+    void run() override
+    {
+        auto result = PitchDetector::detect (sampleData->buffer,
+                                              sampleData->sourceSampleRate,
+                                              start, end);
+
+        juce::MessageManager::callAsync ([cb = onComplete, result]()
+        {
+            if (cb)
+                cb (result);
+        });
+    }
+
+private:
+    std::shared_ptr<SampleData> sampleData;
+    float start, end;
+    std::function<void (PitchDetector::Result)> onComplete;
+};
+
+// ── TuneResultOverlay — themed dialog matching ConfirmOverlay design ────────
+class WaveformDisplay::TuneResultOverlay : public juce::Component
+{
+public:
+    TuneResultOverlay (const juce::String& titleText,
+                       const juce::String& noteName,
+                       const juce::String& messageText,
+                       bool showRevert,
+                       juce::Point<int> anchor,
+                       std::function<void (bool)> onDismiss)
+        : anchorPoint (anchor),
+          dismissCallback (std::move (onDismiss)),
+          sureButton ("Sure!"),
+          revertButton ("No way!")
+    {
+        setInterceptsMouseClicks (true, true);
+
+        titleLabel.setText (titleText, juce::dontSendNotification);
+        titleLabel.setJustificationType (juce::Justification::centred);
+        titleLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcc88ff));
+        addAndMakeVisible (titleLabel);
+
+        nameLabel.setText (noteName, juce::dontSendNotification);
+        nameLabel.setJustificationType (juce::Justification::centred);
+        nameLabel.setColour (juce::Label::textColourId, juce::Colour (0xffa0d8ff));
+        nameLabel.setMinimumHorizontalScale (0.0f);
+        addAndMakeVisible (nameLabel);
+
+        messageLabel.setText (messageText, juce::dontSendNotification);
+        messageLabel.setJustificationType (juce::Justification::centred);
+        messageLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.7f));
+        addAndMakeVisible (messageLabel);
+
+        sureButton.onClick = [this] { if (dismissCallback) dismissCallback (false); };
+        addAndMakeVisible (sureButton);
+
+        if (showRevert)
+        {
+            revertButton.onClick = [this] { if (dismissCallback) dismissCallback (true); };
+            addAndMakeVisible (revertButton);
+        }
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.65f));
+        g.fillAll();
+
+        auto db = getDialogBounds();
+        g.setColour (juce::Colour (0xff18182a));
+        g.fillRoundedRectangle (db, 6.0f);
+        g.setColour (juce::Colour (0xffcc88ff).withAlpha (0.55f));
+        g.drawRoundedRectangle (db.reduced (0.5f), 6.0f, 1.5f);
+    }
+
+    void resized() override
+    {
+        auto area = getDialogBounds().toNearestInt().reduced (14);
+
+        titleLabel.setBounds (area.removeFromTop (22));
+        area.removeFromTop (4);
+        nameLabel.setBounds (area.removeFromTop (20));
+        area.removeFromTop (2);
+        messageLabel.setBounds (area.removeFromTop (18));
+        area.removeFromTop (10);
+
+        auto btnRow = area.removeFromTop (24);
+        const int btnW  = 84;
+        const int gap   = 10;
+
+        if (revertButton.isVisible())
+        {
+            const int total = btnW * 2 + gap;
+            const int startX = btnRow.getCentreX() - total / 2;
+            revertButton.setBounds (startX, btnRow.getY(), btnW, 22);
+            sureButton.setBounds   (startX + btnW + gap, btnRow.getY(), btnW, 22);
+        }
+        else
+        {
+            sureButton.setBounds (btnRow.getCentreX() - btnW / 2, btnRow.getY(), btnW, 22);
+        }
+    }
+
+    void mouseDown (const juce::MouseEvent&) override {}
+
+private:
+    juce::Rectangle<float> getDialogBounds() const
+    {
+        const float w = 310.0f;
+        const float h = 140.0f;
+        const int margin = 6;
+
+        // Position the dialog just below the TUNE badge.
+        float x = static_cast<float> (anchorPoint.x) - w * 0.5f;
+        float y = static_cast<float> (anchorPoint.y) + margin;
+
+        // Clamp to stay within the overlay bounds.
+        x = juce::jlimit (static_cast<float> (margin),
+                           static_cast<float> (getWidth()) - w - margin, x);
+        y = juce::jlimit (static_cast<float> (margin),
+                           static_cast<float> (getHeight()) - h - margin, y);
+
+        return { x, y, w, h };
+    }
+
+    juce::Point<int>           anchorPoint;
+    std::function<void (bool)> dismissCallback;   // true = revert
+    juce::Label      titleLabel;
+    juce::Label      nameLabel;
+    juce::Label      messageLabel;
+    juce::TextButton sureButton;
+    juce::TextButton revertButton;
+};
 
 // Draws the filename badge and normalize toggle.  Lives in a child component
 // added after the markers so it paints on top of them.
@@ -62,6 +212,45 @@ void WaveformDisplay::BadgeOverlay::paint (juce::Graphics& g)
         g.setColour (normOn ? juce::Colours::white
                             : juce::Colours::white.withAlpha (0.55f));
         g.drawText ("NORM", normBadge.reduced (kPadX, 0), juce::Justification::centred, true);
+    }
+
+    // --- Auto-tune badge (left of NORM badge) ---
+    if (owner.loadedFileName.isNotEmpty())
+    {
+        const auto tuneBadge = getTuneBadgeBounds();
+        if (! tuneBadge.isEmpty())
+        {
+            juce::Colour bgColour;
+            juce::String label;
+
+            if (tuneInProgress)
+            {
+                // Pulsing amber while detecting.
+                const float pulse = 0.6f + 0.4f * std::sin (static_cast<float> (
+                    juce::Time::getMillisecondCounter()) * 0.008f);
+                bgColour = juce::Colour (0xcc996600).withMultipliedAlpha (pulse);
+                label = "...";
+            }
+            else if (tuneResultCountdown > 0)
+            {
+                // Brief green flash showing the detected note.
+                bgColour = juce::Colour (0xcc006633);
+                label = tuneResultText;
+            }
+            else
+            {
+                bgColour = juce::Colour (0xcc0d1a2e);
+                label = "TUNE";
+            }
+
+            g.setColour (bgColour);
+            g.fillRoundedRectangle (tuneBadge.toFloat(), 3.0f);
+
+            g.setColour (tuneInProgress || tuneResultCountdown > 0
+                             ? juce::Colours::white
+                             : juce::Colours::white.withAlpha (0.55f));
+            g.drawText (label, tuneBadge.reduced (kPadX, 0), juce::Justification::centred, true);
+        }
     }
 }
 
@@ -125,14 +314,64 @@ juce::Rectangle<int> WaveformDisplay::BadgeOverlay::getNormBadgeBounds() const
     return { bgX, bgY, bgW, bgH };
 }
 
+juce::Rectangle<int> WaveformDisplay::BadgeOverlay::getTuneBadgeBounds() const
+{
+    if (owner.loadedFileName.isEmpty())
+        return {};
+
+    const auto normBadge = getNormBadgeBounds();
+    if (normBadge.isEmpty())
+        return {};
+
+    constexpr int   kPadX   = 6;
+    constexpr int   kGap    = 3;
+    constexpr float kFontSz = 11.0f;
+
+    juce::Font f (juce::Font::getDefaultMonospacedFontName(), kFontSz, juce::Font::plain);
+    const int textW = f.getStringWidth ("TUNE");
+
+    const int bgW = textW + kPadX * 2;
+    const int bgH = normBadge.getHeight();
+    const int bgX = normBadge.getX() - bgW - kGap;
+    const int bgY = normBadge.getY();
+
+    return { bgX, bgY, bgW, bgH };
+}
+
 bool WaveformDisplay::BadgeOverlay::hitTest (int x, int y)
 {
     return getBadgeBounds().contains (x, y)
-        || getNormBadgeBounds().contains (x, y);
+        || getNormBadgeBounds().contains (x, y)
+        || getTuneBadgeBounds().contains (x, y);
+}
+
+juce::String WaveformDisplay::BadgeOverlay::getTooltip()
+{
+    const auto mouse = getMouseXYRelative();
+
+    if (getTuneBadgeBounds().contains (mouse))
+        return "Sample Tuning (experimental)\n\n"
+               "Detects the pitch of the loaded sample and adjusts\n"
+               "the root note so MIDI keys match the actual note.\n"
+               "Uses the region between the Start and End markers.\n\n"
+               "This is an experimental feature and may not always\n"
+               "produce accurate results.";
+
+    if (getNormBadgeBounds().contains (mouse))
+        return "Peak Normalize\n\n"
+               "Scales the sample to full volume based on its peak level.";
+
+    return {};
 }
 
 void WaveformDisplay::BadgeOverlay::mouseUp (const juce::MouseEvent& e)
 {
+    if (getTuneBadgeBounds().contains (e.getPosition()))
+    {
+        owner.launchPitchDetection();
+        return;
+    }
+
     if (getNormBadgeBounds().contains (e.getPosition()))
     {
         if (auto* p = owner.apvts.getParameter (ParamIDs::normalizeEnabled))
@@ -287,6 +526,9 @@ WaveformDisplay::WaveformDisplay (juce::AudioProcessorValueTreeState& ap,
 
 WaveformDisplay::~WaveformDisplay()
 {
+    if (pitchJob != nullptr)
+        pitchJob->stopThread (1000);
+
     zoomSlider.setLookAndFeel (nullptr);  // clear before zoomSliderLAF destructs
     stopTimer();
     thumbnail.removeChangeListener (this);
@@ -490,7 +732,7 @@ void WaveformDisplay::paint (juce::Graphics& g)
         {
             const float markerX = normToPixelX (cachedPlaybackPos, W);
             g.setColour (juce::Colour (0xff4dc8ff));
-            g.drawLine (markerX, 0.0f, markerX, H, 2.0f);
+            g.drawLine (markerX, 0.0f, markerX, H, 4.0f);
         }
 
         // Granulizer grain read position marker (violet, dashed — matches granulizer knob pointers).
@@ -693,6 +935,15 @@ void WaveformDisplay::timerCallback()
         }
     }
 
+    // Tick the TUNE badge animation / result countdown.
+    if (badgeOverlay.tuneInProgress)
+        badgeOverlay.repaint();
+    if (badgeOverlay.tuneResultCountdown > 0)
+    {
+        --badgeOverlay.tuneResultCountdown;
+        badgeOverlay.repaint();
+    }
+
     if (engine == nullptr)
         return;
 
@@ -813,4 +1064,139 @@ void WaveformDisplay::updateViewWindow()
 float WaveformDisplay::normToPixelX (float norm, float areaWidth) const
 {
     return (norm - viewStart) / viewWidth * areaWidth;
+}
+
+// ── Pitch detection (auto-tune) ──────────────────────────────────────────────
+
+void WaveformDisplay::launchPitchDetection()
+{
+    if (badgeOverlay.tuneInProgress)
+        return;
+
+    if (engine == nullptr)
+        return;
+
+    auto sample = engine->getSampleData();
+    if (sample == nullptr || sample->buffer.getNumSamples() == 0)
+        return;
+
+    // Save current root note so "No way!" can revert.
+    if (auto* param = apvts.getParameter (ParamIDs::rootNote))
+        previousRootNote = juce::roundToInt (param->convertFrom0to1 (param->getValue()));
+
+    badgeOverlay.tuneInProgress = true;
+    badgeOverlay.tuneResultCountdown = 0;
+    badgeOverlay.repaint();
+
+    // Stop any previous job.
+    if (pitchJob != nullptr)
+    {
+        pitchJob->stopThread (500);
+        pitchJob.reset();
+    }
+
+    // Use the current start/end marker positions to crop the analysis region.
+    const float startPos = apvts.getRawParameterValue (ParamIDs::sampleStartPos)->load();
+    const float endPos   = apvts.getRawParameterValue (ParamIDs::sampleEndPos)->load();
+
+    pitchJob = std::make_unique<PitchDetectionJob> (
+        sample, startPos, endPos,
+        [this] (PitchDetector::Result result)
+        {
+            if (result.midiNote >= 0)
+                onPitchDetected (result.midiNote, result.frequencyHz,
+                                 result.confidence);
+            else
+                onPitchDetectionFailed();
+        });
+
+    pitchJob->startThread (juce::Thread::Priority::normal);
+}
+
+void WaveformDisplay::onPitchDetected (int midiNote, float /*freqHz*/, float confidence)
+{
+    // Keep only the note class (C, C#, D, …) and clamp the octave to 3–4.
+    const int noteClass    = midiNote % 12;
+    const int detectedOct  = midiNote / 12;
+    const int clampedOct   = juce::jlimit (3, 4, detectedOct);
+    const int adjustedNote = clampedOct * 12 + noteClass;
+
+    if (auto* param = apvts.getParameter (ParamIDs::rootNote))
+    {
+        const float normVal = param->convertTo0to1 (static_cast<float> (adjustedNote));
+        param->setValueNotifyingHost (normVal);
+    }
+
+    if (onRootNoteChanged)
+        onRootNoteChanged();
+
+    auto noteName = juce::MidiMessage::getMidiNoteName (adjustedNote, true, false, 3);
+
+    badgeOverlay.tuneInProgress = false;
+    badgeOverlay.tuneResultText = noteName;
+    badgeOverlay.tuneResultCountdown = 30;
+    badgeOverlay.repaint();
+
+    showTuneOverlay (noteName, true, adjustedNote, confidence);
+}
+
+void WaveformDisplay::onPitchDetectionFailed()
+{
+    badgeOverlay.tuneInProgress = false;
+    badgeOverlay.tuneResultText = "N/A";
+    badgeOverlay.tuneResultCountdown = 30;
+    badgeOverlay.repaint();
+
+    showTuneOverlay ("", false, -1, 0.0f);
+}
+
+void WaveformDisplay::showTuneOverlay (const juce::String& noteName, bool success,
+                                       int /*newNote*/, float confidence)
+{
+    tuneOverlay.reset();
+
+    juce::String title   = "Sample Tuning";
+    juce::String name    = success ? noteName : "";
+    juce::String message;
+    if (success)
+    {
+        message = "Root note tuned to " + noteName + "  (confidence: "
+                  + juce::String (juce::roundToInt (confidence * 100.0f)) + "%)";
+    }
+    else
+    {
+        message = "Note not detected";
+    }
+
+    // Compute the TUNE badge bottom-centre in the top-level component's space.
+    auto tuneBadge = badgeOverlay.getTuneBadgeBounds();
+    auto anchorLocal = badgeOverlay.getPosition()
+                     + juce::Point<int> (tuneBadge.getCentreX(), tuneBadge.getBottom());
+
+    auto* topLevel = getTopLevelComponent();
+    auto anchorTop = topLevel->getLocalPoint (this, anchorLocal);
+
+    tuneOverlay = std::make_unique<TuneResultOverlay> (
+        title, name, message, success, anchorTop,
+        [this] (bool revert)
+        {
+            dismissTuneOverlay (revert);
+        });
+
+    topLevel->addAndMakeVisible (*tuneOverlay);
+    tuneOverlay->setBounds (topLevel->getLocalBounds());
+}
+
+void WaveformDisplay::dismissTuneOverlay (bool revert)
+{
+    if (revert)
+    {
+        if (auto* param = apvts.getParameter (ParamIDs::rootNote))
+        {
+            const float normVal = param->convertTo0to1 (static_cast<float> (previousRootNote));
+            param->setValueNotifyingHost (normVal);
+        }
+    }
+
+    tuneOverlay.reset();
 }

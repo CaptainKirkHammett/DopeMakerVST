@@ -10,6 +10,10 @@ PluginProcessor::PluginProcessor()
     formatManager.registerBasicFormats();
     setupLfoNoteOnCallback();
 
+    // Initialise drawn sidechain envelope to unity (fully open).
+    std::fill (std::begin (sidechainDrawnEnvelope), std::end (sidechainDrawnEnvelope), 1.0f);
+    sidechainProc.setDrawnEnvelope (sidechainDrawnEnvelope, kSidechainTableSize);
+
     // Cache gate step parameter pointers to avoid per-block string lookups.
     for (int i = 0; i < GateController::kMaxSteps; ++i)
         gateStepPtrs[i] = apvts.getRawParameterValue (ParamIDs::gateStepId (i).c_str());
@@ -111,8 +115,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         ParamIDs::velLfoTempoSync, "Vel LFO Tempo Sync", false));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::velLfoSyncDiv, "Vel LFO Sync Division",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
-        4));
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        5));  // default: 1/4
 
     // --- Sample Start LFO ---
     params.push_back (std::make_unique<juce::AudioParameterBool> (
@@ -139,21 +143,21 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::lfoWaveform, "LFO Waveform",
         juce::StringArray { "Sine","Triangle","Square","Saw Up","Saw Down","Rnd Sine","Rnd Square" },
-        0));
+        5));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::lfoRate, "Sample Start LFO Rate",
-        juce::NormalisableRange<float> (0.01f, 20.0f, 0.0f, 0.3f), 1.0f));
+        juce::NormalisableRange<float> (0.01f, 20.0f, 0.0f, 0.3f), 10.0f));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::lfoDepth, "Sample Start LFO Depth",
-        juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f,
+        juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f,
         juce::String(), juce::AudioProcessorParameter::genericParameter,
         [] (float v, int) { return juce::String (v, 3); }));
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         ParamIDs::lfoTempoSync, "LFO Tempo Sync", false));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::lfoSyncDiv, "LFO Sync Division",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
-        4));
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        5));  // default: 1/4
 
     // --- Volume Envelope ---
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
@@ -211,27 +215,27 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::volRelLfoWaveform, "Vol Rel LFO Wave",
         juce::StringArray { "Sine","Triangle","Square","Saw Up","Saw Down","Rnd Sine","Rnd Square" },
-        0));
+        5));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::volRelLfoRate, "Vol Rel LFO Rate",
         juce::NormalisableRange<float> (0.01f, 20.0f, 0.0f, 0.3f), 1.0f));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::volRelLfoDepth, "Vol Rel LFO Depth",
-        juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f,
+        juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f,
         juce::String(), juce::AudioProcessorParameter::genericParameter,
         [] (float v, int) { return juce::String (v, 3); }));
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         ParamIDs::volRelLfoTempoSync, "Vol Rel LFO Sync", false));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::volRelLfoSyncDiv, "Vol Rel LFO Div",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
-        4));
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        5));  // default: 1/4
 
     // --- Pitch LFO ---
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::pitchLfoWaveform, "Pitch LFO Wave",
         juce::StringArray { "Sine","Triangle","Square","Saw Up","Saw Down","Rnd Sine","Rnd Square" },
-        0));
+        5));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::pitchLfoRate, "Pitch LFO Rate",
         juce::NormalisableRange<float> (0.01f, 10.0f, 0.0f, 0.3f), 1.0f));
@@ -241,8 +245,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         ParamIDs::pitchLfoTempoSync, "Pitch LFO Sync", false));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::pitchLfoSyncDiv, "Pitch LFO Div",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
-        4));
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        5));  // default: 1/4
 
     // --- Pitch Envelope ---
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
@@ -379,8 +383,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         ParamIDs::reverbRevSync, "Reverb Reverse Sync", false));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::reverbRevDiv, "Reverb Reverse Division",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
-        4));   // default: 1/4
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        5));   // default: 1/4
 
     // --- Phaser ---
     params.push_back (std::make_unique<juce::AudioParameterBool> (
@@ -418,14 +422,18 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         juce::NormalisableRange<float> (1.0f, 32.0f, 1.0f), 16.0f));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::gateDivision, "Gate Division",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
-        1)); // default: 1/16
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        2)); // default: 1/16
     for (int i = 0; i < GateController::kMaxSteps; ++i)
         params.push_back (std::make_unique<juce::AudioParameterFloat> (
             ParamIDs::gateStepId (i), "Gate Step " + juce::String (i + 1),
             0.0f, 1.0f, 1.0f));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
-        ParamIDs::gateVolumeAmt, "Step Volume Gate Amount", 0.0f, 1.0f, 0.0f));
+        ParamIDs::gateVolumeAmt, "Trance Gate Amount", 0.0f, 1.0f, 0.0f));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        ParamIDs::gateRouting, "Trance Gate Routing",
+        juce::StringArray { "Pre FX", "Pre Reverb", "Post FX" },
+        0));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::envFilterAmt,  "Step Filter Amount",  -1.0f, 1.0f, 0.0f));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
@@ -474,12 +482,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         ParamIDs::delayTempoSync, "Delay Tempo Sync", true));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::delayTimeLDiv, "Delay L Div",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
-        4));
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        5));  // default: 1/4
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::delayTimeRDiv, "Delay R Div",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
-        3));
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        4));  // default: 1/8D
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::delayFeedback, "Delay Feedback",
         juce::NormalisableRange<float> (0.0f, 0.99f), 0.4f,
@@ -531,8 +539,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         ParamIDs::delayMixLfoSync, "Delay Mix LFO Sync", false));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::delayMixLfoDiv, "Delay Mix LFO Div",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
-        4));
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        5));  // default: 1/4
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::delayDuck, "Delay Duck",
         juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f));
@@ -610,8 +618,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         ParamIDs::arpNoteLength, "Arpeggiator Note Length", 0.0f, 1.0f, 0.8f));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::arpDivision, "Arpeggiator Division",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
-        1));  // default: 1/16
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        2));  // default: 1/16
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::arpProbability, "Arp Play Probability", 0.0f, 1.0f, 1.0f));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
@@ -619,21 +627,22 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         juce::StringArray { "Sine","Tri","Sqr","SawU","SawD","Rnd~","Rnd|" }, 0));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::arpLfoDivision, "Arp LFO Division",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
-        4));  // default: 1/4
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        5));  // default: 1/4
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::arpLfoDepth, "Arp Note Length LFO Depth", 0.0f, 1.0f, 0.5f));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::arpTie, "Arpeggiator Tie", 0.0f, 1.0f, 0.0f));
 
     // --- Sidechain volume modulator ---
+    // Mode: 0 = Off, 1 = Pre-FX, 2 = Post-FX, 3 = FX Only
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::sidechainMode, "Sidechain Mode",
-        juce::StringArray { "Sidechain Off", "Sidechain Pre", "Sidechain Post" }, 0));
+        juce::StringArray { "Sidechain Off", "Sidechain Pre", "Sidechain Post", "Sidechain FX Only" }, 0));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::sidechainDivision, "Sidechain Division",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
-        4));  // default: 1/4
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        5));  // default: 1/4
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::sidechainMix, "Sidechain Mix",
         juce::NormalisableRange<float> (0.0f, 1.0f), 0.8f,
@@ -659,6 +668,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f,
         juce::String(), juce::AudioProcessorParameter::genericParameter,
         [] (float v, int) { return juce::String (v, 3); }));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        ParamIDs::sidechainDrawMode, "Sidechain Draw Mode", false));
 
     // --- Stutter ---
     params.push_back (std::make_unique<juce::AudioParameterBool> (
@@ -776,6 +787,7 @@ void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 
     // Shared scratch buffer for dry/wet crossfade during FX enable transitions.
     fxDryBuffer.setSize (2, samplesPerBlock);
+    scPreFxBuffer.setSize (2, samplesPerBlock);
 
     stereoProc.prepare  (spec);
     limiterProc.prepare (spec);
@@ -801,6 +813,7 @@ void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     gateController.prepare   (spec);
     audioEnvFollower.prepare (spec);
     sidechainProc.prepare    (sampleRate);
+    sidechainProc.setDrawnEnvelope (sidechainDrawnEnvelope, kSidechainTableSize);
     arpProc.prepare          (sampleRate);
 }
 
@@ -1222,9 +1235,19 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     }
 
     // Sidechain Pre-FX — volume modulation before the FX chain.
+    const bool scDrawMode = apvts.getRawParameterValue (ParamIDs::sidechainDrawMode)->load() > 0.5f;
+
     {
         const int scMode = static_cast<int> (
             apvts.getRawParameterValue (ParamIDs::sidechainMode)->load());
+
+        // FX Only mode: snapshot the dry signal before the FX chain.
+        if (scMode == 3)
+        {
+            for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                scPreFxBuffer.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
+        }
+
         if (scMode == 1)
         {
             const auto scDiv = static_cast<SyncDivision> (
@@ -1235,21 +1258,25 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 apvts.getRawParameterValue (ParamIDs::sidechainCurve)->load(),
                 apvts.getRawParameterValue (ParamIDs::sidechainFall)->load(),
                 apvts.getRawParameterValue (ParamIDs::sidechainMix)->load(),
-                currentPpqPosition);
+                currentPpqPosition, scDrawMode);
         }
     }
 
-    // FX chain: Volume Gate → Stutter → Filter → Distortion → Phaser → Ping-Pong Delay.
+    // FX chain: Volume Gate → Stutter → Filter → Distortion → Flanger → Phaser → Reverb → Ping-Pong Delay.
     // Each FX skipped entirely if disabled — no CPU waste.
+    // Volume gate routing: 0 = Pre FX, 1 = Pre Reverb, 2 = Post FX.
+
+    const int gateRoutingIdx = static_cast<int> (
+        apvts.getRawParameterValue (ParamIDs::gateRouting)->load());
 
     // Step volume gate — per-sample smoothed to prevent clicks at step transitions.
+    auto applyGateVolume = [&]()
     {
         const bool gateOn = apvts.getRawParameterValue (ParamIDs::gateEnabled)->load() > 0.5f;
         const float gateAmt = gateOn
             ? apvts.getRawParameterValue (ParamIDs::gateVolumeAmt)->load()
             : 0.0f;
 
-        // Target gain: blend between 1.0 (dry) and envLevel (fully gated).
         const float targetGain = 1.0f - gateAmt * (1.0f - envLevel);
         gateVolumeSmoothed.setTargetValue (targetGain);
 
@@ -1262,7 +1289,10 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     buffer.getWritePointer (ch)[s] *= g;
             }
         }
-    }
+    };
+
+    if (gateRoutingIdx == 0)
+        applyGateVolume();
 
     // Stutter Len LFO — modulates the Len parameter each block.
     {
@@ -1489,6 +1519,9 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
+    if (gateRoutingIdx == 1)
+        applyGateVolume();
+
     {
         reverbEnableSmoothed.setTargetValue (
             apvts.getRawParameterValue (ParamIDs::reverbEnabled)->load() > 0.5f ? 1.0f : 0.0f);
@@ -1627,6 +1660,9 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
+    if (gateRoutingIdx == 2)
+        applyGateVolume();
+
     // Kill-tail: always runs so prevKillTailState is never stale when delay
     // is toggled on.  No auto-reset here — the UI pulses 0→1→0 manually, and
     // DAW automation controls the value directly without plugin interference.
@@ -1651,7 +1687,46 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 apvts.getRawParameterValue (ParamIDs::sidechainCurve)->load(),
                 apvts.getRawParameterValue (ParamIDs::sidechainFall)->load(),
                 apvts.getRawParameterValue (ParamIDs::sidechainMix)->load(),
-                currentPpqPosition);
+                currentPpqPosition, scDrawMode);
+        }
+
+        // Sidechain FX Only — apply envelope to the wet FX signal only;
+        // the dry sound passes through untouched.  Mix knob acts as Vol
+        // (volume of the sidechained FX return).
+        if (scMode == 3)
+        {
+            const int n  = buffer.getNumSamples();
+            const int nC = buffer.getNumChannels();
+            const float vol = apvts.getRawParameterValue (ParamIDs::sidechainMix)->load();
+
+            // Step 1: isolate the wet signal in buffer (subtract dry).
+            for (int ch = 0; ch < nC; ++ch)
+            {
+                float*       out = buffer.getWritePointer (ch);
+                const float* dry = scPreFxBuffer.getReadPointer (ch);
+                for (int s = 0; s < n; ++s)
+                    out[s] -= dry[s];
+            }
+
+            // Step 2: apply sidechain envelope to the wet-only signal (full depth).
+            const auto scDiv = static_cast<SyncDivision> (
+                static_cast<int> (apvts.getRawParameterValue (ParamIDs::sidechainDivision)->load()));
+            sidechainProc.process (buffer, getCurrentBpm(), scDiv,
+                apvts.getRawParameterValue (ParamIDs::sidechainPreDelay)->load(),
+                apvts.getRawParameterValue (ParamIDs::sidechainRise)->load(),
+                apvts.getRawParameterValue (ParamIDs::sidechainCurve)->load(),
+                apvts.getRawParameterValue (ParamIDs::sidechainFall)->load(),
+                1.0f,   // full sidechain depth on wet signal
+                currentPpqPosition, scDrawMode);
+
+            // Step 3: recombine — dry untouched + sidechained wet scaled by Vol.
+            for (int ch = 0; ch < nC; ++ch)
+            {
+                float*       out = buffer.getWritePointer (ch);
+                const float* dry = scPreFxBuffer.getReadPointer (ch);
+                for (int s = 0; s < n; ++s)
+                    out[s] = dry[s] + out[s] * vol;
+            }
         }
     }
 
@@ -1914,6 +1989,17 @@ void PluginProcessor::getStateInformation (juce::MemoryBlock& destData)
     else
         state.removeProperty ("presetName", nullptr);
 
+    // Serialize drawn sidechain envelope as a comma-separated string.
+    {
+        juce::String envStr;
+        for (int i = 0; i < kSidechainTableSize; ++i)
+        {
+            if (i > 0) envStr += ",";
+            envStr += juce::String (sidechainDrawnEnvelope[i], 4);
+        }
+        state.setProperty ("sidechainDrawnEnvelope", envStr, nullptr);
+    }
+
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, destData);
 }
@@ -2020,6 +2106,19 @@ void PluginProcessor::setStateInformation (const void* data, int sizeInBytes)
         state.getProperty ("presetName", "").toString());
 
     apvts.replaceState (state);
+
+    // Restore drawn sidechain envelope.
+    {
+        const auto envStr = state.getProperty ("sidechainDrawnEnvelope", "").toString();
+        if (envStr.isNotEmpty())
+        {
+            juce::StringArray tokens;
+            tokens.addTokens (envStr, ",", "");
+            const int count = juce::jmin (tokens.size(), kSidechainTableSize);
+            for (int i = 0; i < count; ++i)
+                sidechainDrawnEnvelope[i] = tokens[i].getFloatValue();
+        }
+    }
 
     // Request a DSP flush so no audio from the previous preset spills over.
     // The actual flush runs on the audio thread at the top of processBlock().

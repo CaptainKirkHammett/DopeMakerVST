@@ -126,6 +126,7 @@ namespace ParamIDs
         return std::string (buf);
     }
     inline constexpr const char* gateVolumeAmt  = "gateVolumeAmt";
+    inline constexpr const char* gateRouting    = "gateRouting";
     inline constexpr const char* envFilterAmt       = "envFilterAmt";
     inline constexpr const char* envDistAmt         = "envDistAmt";
     inline constexpr const char* envFlangerAmt      = "envFlangerAmt";
@@ -178,6 +179,7 @@ namespace ParamIDs
     inline constexpr const char* sidechainRise      = "sidechainRise";
     inline constexpr const char* sidechainCurve     = "sidechainCurve";
     inline constexpr const char* sidechainFall      = "sidechainFall";  // 0=instant drop, 1=shaped fall
+    inline constexpr const char* sidechainDrawMode = "sidechainDrawMode"; // 0=knob, 1=draw
 
     // --- Reverb ---
     inline constexpr const char* reverbEnabled  = "reverbEnabled";

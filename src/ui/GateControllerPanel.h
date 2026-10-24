@@ -47,6 +47,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> stepCountAttach;
 
     std::unique_ptr<DuckFaderButton> gateFader;
+    juce::TextButton routeButton { "A" };
     juce::ComboBox divBox;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> divAttach;
 

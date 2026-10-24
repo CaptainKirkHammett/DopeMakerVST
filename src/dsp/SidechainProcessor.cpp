@@ -51,6 +51,24 @@ float SidechainProcessor::computeEnvelope (float preDelay01, float rise01, float
     return 1.0f;
 }
 
+void SidechainProcessor::setDrawnEnvelope (const float* table, int tableSize)
+{
+    drawnTable     = table;
+    drawnTableSize = tableSize;
+}
+
+float SidechainProcessor::lookupDrawnEnvelope() const
+{
+    if (drawnTable == nullptr || drawnTableSize <= 0)
+        return 1.0f;
+
+    const float idx = static_cast<float> (phase) * static_cast<float> (drawnTableSize);
+    const int   i0  = juce::jlimit (0, drawnTableSize - 1, static_cast<int> (idx));
+    const int   i1  = juce::jlimit (0, drawnTableSize - 1, i0 + 1);
+    const float frac = idx - static_cast<float> (i0);
+    return drawnTable[i0] + frac * (drawnTable[i1] - drawnTable[i0]);
+}
+
 void SidechainProcessor::process (juce::AudioBuffer<float>& buffer,
                                    double       bpm,
                                    SyncDivision division,
@@ -59,13 +77,15 @@ void SidechainProcessor::process (juce::AudioBuffer<float>& buffer,
                                    float        curve,
                                    float        fall01,
                                    float        mix,
-                                   double       ppqPosition)
+                                   double       ppqPosition,
+                                   bool         useDrawnEnvelope)
 {
     if (mix <= 0.0f)
         return;
 
     // Division lengths in quarter notes — mirrors LfoProcessor::kDivBeats.
     static constexpr double kDivBeats[] = {
+        1.0 / 16.0,  // 1/64
         1.0 / 8.0,   // 1/32
         1.0 / 4.0,   // 1/16
         1.0 / 2.0,   // 1/8
@@ -97,7 +117,8 @@ void SidechainProcessor::process (juce::AudioBuffer<float>& buffer,
 
     for (int s = 0; s < n; ++s)
     {
-        const float env     = computeEnvelope (preDelay01, rise01, curve, fall01);
+        const float env     = useDrawnEnvelope ? lookupDrawnEnvelope()
+                                               : computeEnvelope (preDelay01, rise01, curve, fall01);
         // Blend: gain=1 at mix=0, gain=env at mix=1.  Clamp to avoid negative gain.
         const float rawGain = juce::jmax (0.0f, 1.0f + mix * (env - 1.0f));
         // One-pole LP smoother kills clicks from abrupt gain steps.

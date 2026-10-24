@@ -2,7 +2,7 @@ name: Build macOS
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, 'dev/**']
   pull_request:
     branches: [main, master]
   workflow_dispatch:
@@ -35,6 +35,45 @@ jobs:
       - name: List artefacts
         run: find build -name "*.vst3" -o -name "*.component" | head -20
 
+      - name: Build macOS installer (.pkg)
+        run: |
+          PKG_ROOT="pkg-root"
+
+          # VST3
+          mkdir -p "$PKG_ROOT/Library/Audio/Plug-Ins/VST3"
+          cp -R "build/SuomiSampler_artefacts/Release/VST3/Dope Maker.vst3" \
+                "$PKG_ROOT/Library/Audio/Plug-Ins/VST3/"
+
+          # AU
+          mkdir -p "$PKG_ROOT/Library/Audio/Plug-Ins/Components"
+          cp -R "build/SuomiSampler_artefacts/Release/AU/Dope Maker.component" \
+                "$PKG_ROOT/Library/Audio/Plug-Ins/Components/"
+
+          # Factory presets — installed via postinstall script to user home
+          mkdir -p pkg-presets/Fvcktory\ Bank/Samples
+          cp factorypresets/*.dmpreset "pkg-presets/Fvcktory Bank/"
+          cp samplesounds/*.wav "pkg-presets/Fvcktory Bank/Samples/"
+
+          # Use installer scripts from repo
+          mkdir -p scripts
+          cp installer/macos-postinstall.sh scripts/postinstall
+          cp installer/macos-preinstall.sh scripts/preinstall
+          chmod +x scripts/postinstall scripts/preinstall
+
+          # Copy presets to the pkg payload at /tmp location
+          mkdir -p "$PKG_ROOT/tmp/DopeMaker_FactoryPresets/Samples"
+          cp factorypresets/*.dmpreset "$PKG_ROOT/tmp/DopeMaker_FactoryPresets/"
+          cp samplesounds/*.wav "$PKG_ROOT/tmp/DopeMaker_FactoryPresets/Samples/"
+
+          # Build the .pkg
+          pkgbuild \
+            --root "$PKG_ROOT" \
+            --scripts scripts \
+            --identifier "town.dope.dopemaker" \
+            --version "dev" \
+            --install-location "/" \
+            "DopeMaker_dev_macOS.pkg"
+
       - name: Upload VST3
         uses: actions/upload-artifact@v4
         with:
@@ -46,3 +85,9 @@ jobs:
         with:
           name: DopeMaker-macOS-AU
           path: build/SuomiSampler_artefacts/Release/AU/Dope Maker.component
+
+      - name: Upload Installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: DopeMaker-macOS-Installer
+          path: DopeMaker_dev_macOS.pkg

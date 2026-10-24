@@ -29,6 +29,9 @@ public:
     // Wire up the limiter GR source so the Limiter knob pointer reflects clamping intensity.
     void setLimiterGainReductionSource (std::atomic<float>* src);
 
+    // Flash the root-note combo box twice to draw attention after auto-tuning.
+    void blinkRootNoteBox();
+
 private:
     void parameterChanged (const juce::String& parameterID, float newValue) override;
     void timerCallback() override;
@@ -98,4 +101,14 @@ private:
 
     std::atomic<float>* limiterGrSource  { nullptr };
     float               displayedGrDb   { 0.0f };   // decays slowly for smooth visual falloff
+
+    // Root-note blink: a floating overlay added above the dim layer on the top-level window.
+    int rootNoteBlinkTicks { 0 };
+
+    struct RootNoteBlinkOverlay : public juce::Component
+    {
+        void paint (juce::Graphics& g) override;
+        bool highlight { false };
+    };
+    std::unique_ptr<RootNoteBlinkOverlay> blinkOverlay;
 };
