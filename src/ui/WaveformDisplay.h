@@ -183,6 +183,7 @@ private:
     void launchPitchDetection();
     void onPitchDetected (int midiNote, float freqHz, float confidence);
     void onPitchDetectionFailed();
-    void showTuneOverlay (const juce::String& noteName, bool success, int newNote, float confidence);
+    void showTuneOverlay (const juce::String& noteName, bool success, int newNote,
+                          float confidence);
     void dismissTuneOverlay (bool revert);
 };

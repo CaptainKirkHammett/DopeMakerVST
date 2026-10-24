@@ -6,6 +6,7 @@
 #include "../dsp/PitchDetector.h"
 
 // ── PitchDetectionJob (defined early so the destructor can see the full type) ─
+// Runs single-pitch detection on a background thread.
 class WaveformDisplay::PitchDetectionJob : public juce::Thread
 {
 public:
@@ -24,6 +25,7 @@ public:
         auto result = PitchDetector::detect (sampleData->buffer,
                                               sampleData->sourceSampleRate,
                                               start, end);
+
         juce::MessageManager::callAsync ([cb = onComplete, result]()
         {
             if (cb)
@@ -1100,7 +1102,8 @@ void WaveformDisplay::launchPitchDetection()
         [this] (PitchDetector::Result result)
         {
             if (result.midiNote >= 0)
-                onPitchDetected (result.midiNote, result.frequencyHz, result.confidence);
+                onPitchDetected (result.midiNote, result.frequencyHz,
+                                 result.confidence);
             else
                 onPitchDetectionFailed();
         });
@@ -1111,7 +1114,6 @@ void WaveformDisplay::launchPitchDetection()
 void WaveformDisplay::onPitchDetected (int midiNote, float /*freqHz*/, float confidence)
 {
     // Keep only the note class (C, C#, D, …) and clamp the octave to 3–4.
-    // MIDI note = octave * 12 + noteInOctave  (octave 3 = notes 36–47, octave 4 = 48–59).
     const int noteClass    = midiNote % 12;
     const int detectedOct  = midiNote / 12;
     const int clampedOct   = juce::jlimit (3, 4, detectedOct);
@@ -1153,10 +1155,16 @@ void WaveformDisplay::showTuneOverlay (const juce::String& noteName, bool succes
 
     juce::String title   = "Sample Tuning";
     juce::String name    = success ? noteName : "";
-    juce::String message = success
-        ? "Root note tuned to " + noteName + "  (confidence: "
-              + juce::String (juce::roundToInt (confidence * 100.0f)) + "%)"
-        : "Note not detected";
+    juce::String message;
+    if (success)
+    {
+        message = "Root note tuned to " + noteName + "  (confidence: "
+                  + juce::String (juce::roundToInt (confidence * 100.0f)) + "%)";
+    }
+    else
+    {
+        message = "Note not detected";
+    }
 
     // Compute the TUNE badge bottom-centre in the top-level component's space.
     auto tuneBadge = badgeOverlay.getTuneBadgeBounds();
