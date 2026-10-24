@@ -10,6 +10,10 @@ PluginProcessor::PluginProcessor()
     formatManager.registerBasicFormats();
     setupLfoNoteOnCallback();
 
+    // Initialise drawn sidechain envelope to unity (fully open).
+    std::fill (std::begin (sidechainDrawnEnvelope), std::end (sidechainDrawnEnvelope), 1.0f);
+    sidechainProc.setDrawnEnvelope (sidechainDrawnEnvelope, kSidechainTableSize);
+
     // Cache gate step parameter pointers to avoid per-block string lookups.
     for (int i = 0; i < GateController::kMaxSteps; ++i)
         gateStepPtrs[i] = apvts.getRawParameterValue (ParamIDs::gateStepId (i).c_str());
@@ -631,9 +635,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         ParamIDs::arpTie, "Arpeggiator Tie", 0.0f, 1.0f, 0.0f));
 
     // --- Sidechain volume modulator ---
+    // Mode: 0 = Off, 1 = Pre-FX, 2 = Post-FX, 3 = FX Only
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::sidechainMode, "Sidechain Mode",
-        juce::StringArray { "Sidechain Off", "Sidechain Pre", "Sidechain Post" }, 0));
+        juce::StringArray { "Sidechain Off", "Sidechain Pre", "Sidechain Post", "Sidechain FX Only" }, 0));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::sidechainDivision, "Sidechain Division",
         juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1","1/64" },
@@ -663,6 +668,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f,
         juce::String(), juce::AudioProcessorParameter::genericParameter,
         [] (float v, int) { return juce::String (v, 3); }));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        ParamIDs::sidechainDrawMode, "Sidechain Draw Mode", false));
 
     // --- Stutter ---
     params.push_back (std::make_unique<juce::AudioParameterBool> (
@@ -780,6 +787,7 @@ void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 
     // Shared scratch buffer for dry/wet crossfade during FX enable transitions.
     fxDryBuffer.setSize (2, samplesPerBlock);
+    scPreFxBuffer.setSize (2, samplesPerBlock);
 
     stereoProc.prepare  (spec);
     limiterProc.prepare (spec);
@@ -805,6 +813,7 @@ void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     gateController.prepare   (spec);
     audioEnvFollower.prepare (spec);
     sidechainProc.prepare    (sampleRate);
+    sidechainProc.setDrawnEnvelope (sidechainDrawnEnvelope, kSidechainTableSize);
     arpProc.prepare          (sampleRate);
 }
 
@@ -1226,9 +1235,19 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     }
 
     // Sidechain Pre-FX — volume modulation before the FX chain.
+    const bool scDrawMode = apvts.getRawParameterValue (ParamIDs::sidechainDrawMode)->load() > 0.5f;
+
     {
         const int scMode = static_cast<int> (
             apvts.getRawParameterValue (ParamIDs::sidechainMode)->load());
+
+        // FX Only mode: snapshot the dry signal before the FX chain.
+        if (scMode == 3)
+        {
+            for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                scPreFxBuffer.copyFrom (ch, 0, buffer, ch, 0, buffer.getNumSamples());
+        }
+
         if (scMode == 1)
         {
             const auto scDiv = static_cast<SyncDivision> (
@@ -1239,7 +1258,7 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 apvts.getRawParameterValue (ParamIDs::sidechainCurve)->load(),
                 apvts.getRawParameterValue (ParamIDs::sidechainFall)->load(),
                 apvts.getRawParameterValue (ParamIDs::sidechainMix)->load(),
-                currentPpqPosition);
+                currentPpqPosition, scDrawMode);
         }
     }
 
@@ -1668,7 +1687,46 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 apvts.getRawParameterValue (ParamIDs::sidechainCurve)->load(),
                 apvts.getRawParameterValue (ParamIDs::sidechainFall)->load(),
                 apvts.getRawParameterValue (ParamIDs::sidechainMix)->load(),
-                currentPpqPosition);
+                currentPpqPosition, scDrawMode);
+        }
+
+        // Sidechain FX Only — apply envelope to the wet FX signal only;
+        // the dry sound passes through untouched.  Mix knob acts as Vol
+        // (volume of the sidechained FX return).
+        if (scMode == 3)
+        {
+            const int n  = buffer.getNumSamples();
+            const int nC = buffer.getNumChannels();
+            const float vol = apvts.getRawParameterValue (ParamIDs::sidechainMix)->load();
+
+            // Step 1: isolate the wet signal in buffer (subtract dry).
+            for (int ch = 0; ch < nC; ++ch)
+            {
+                float*       out = buffer.getWritePointer (ch);
+                const float* dry = scPreFxBuffer.getReadPointer (ch);
+                for (int s = 0; s < n; ++s)
+                    out[s] -= dry[s];
+            }
+
+            // Step 2: apply sidechain envelope to the wet-only signal (full depth).
+            const auto scDiv = static_cast<SyncDivision> (
+                static_cast<int> (apvts.getRawParameterValue (ParamIDs::sidechainDivision)->load()));
+            sidechainProc.process (buffer, getCurrentBpm(), scDiv,
+                apvts.getRawParameterValue (ParamIDs::sidechainPreDelay)->load(),
+                apvts.getRawParameterValue (ParamIDs::sidechainRise)->load(),
+                apvts.getRawParameterValue (ParamIDs::sidechainCurve)->load(),
+                apvts.getRawParameterValue (ParamIDs::sidechainFall)->load(),
+                1.0f,   // full sidechain depth on wet signal
+                currentPpqPosition, scDrawMode);
+
+            // Step 3: recombine — dry untouched + sidechained wet scaled by Vol.
+            for (int ch = 0; ch < nC; ++ch)
+            {
+                float*       out = buffer.getWritePointer (ch);
+                const float* dry = scPreFxBuffer.getReadPointer (ch);
+                for (int s = 0; s < n; ++s)
+                    out[s] = dry[s] + out[s] * vol;
+            }
         }
     }
 
@@ -1931,6 +1989,17 @@ void PluginProcessor::getStateInformation (juce::MemoryBlock& destData)
     else
         state.removeProperty ("presetName", nullptr);
 
+    // Serialize drawn sidechain envelope as a comma-separated string.
+    {
+        juce::String envStr;
+        for (int i = 0; i < kSidechainTableSize; ++i)
+        {
+            if (i > 0) envStr += ",";
+            envStr += juce::String (sidechainDrawnEnvelope[i], 4);
+        }
+        state.setProperty ("sidechainDrawnEnvelope", envStr, nullptr);
+    }
+
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, destData);
 }
@@ -2037,6 +2106,19 @@ void PluginProcessor::setStateInformation (const void* data, int sizeInBytes)
         state.getProperty ("presetName", "").toString());
 
     apvts.replaceState (state);
+
+    // Restore drawn sidechain envelope.
+    {
+        const auto envStr = state.getProperty ("sidechainDrawnEnvelope", "").toString();
+        if (envStr.isNotEmpty())
+        {
+            juce::StringArray tokens;
+            tokens.addTokens (envStr, ",", "");
+            const int count = juce::jmin (tokens.size(), kSidechainTableSize);
+            for (int i = 0; i < count; ++i)
+                sidechainDrawnEnvelope[i] = tokens[i].getFloatValue();
+        }
+    }
 
     // Request a DSP flush so no audio from the previous preset spills over.
     // The actual flush runs on the audio thread at the top of processBlock().

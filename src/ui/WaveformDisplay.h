@@ -57,6 +57,9 @@ public:
     // Callback invoked when the user drops a valid audio file.
     std::function<void (const juce::File&)> onFileDrop;
 
+    // Fired when auto-tune changes the root note (so the UI can highlight the selector).
+    std::function<void()> onRootNoteChanged;
+
 private:
     // Custom LookAndFeel for the zoom slider: draws the thumb as a rotating spiral.
     struct ZoomSliderLAF : public juce::LookAndFeel_V4

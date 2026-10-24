@@ -348,7 +348,7 @@ juce::String WaveformDisplay::BadgeOverlay::getTooltip()
     const auto mouse = getMouseXYRelative();
 
     if (getTuneBadgeBounds().contains (mouse))
-        return "Auto-Tune\n\n"
+        return "Sample Tuning\n\n"
                "Detects the pitch of the loaded sample and adjusts\n"
                "the root note so MIDI keys match the actual note.\n"
                "Uses the region between the Start and End markers.";
@@ -728,7 +728,7 @@ void WaveformDisplay::paint (juce::Graphics& g)
         {
             const float markerX = normToPixelX (cachedPlaybackPos, W);
             g.setColour (juce::Colour (0xff4dc8ff));
-            g.drawLine (markerX, 0.0f, markerX, H, 2.0f);
+            g.drawLine (markerX, 0.0f, markerX, H, 4.0f);
         }
 
         // Granulizer grain read position marker (violet, dashed — matches granulizer knob pointers).
@@ -1123,6 +1123,9 @@ void WaveformDisplay::onPitchDetected (int midiNote, float /*freqHz*/, float con
         param->setValueNotifyingHost (normVal);
     }
 
+    if (onRootNoteChanged)
+        onRootNoteChanged();
+
     auto noteName = juce::MidiMessage::getMidiNoteName (adjustedNote, true, false, 3);
 
     badgeOverlay.tuneInProgress = false;
@@ -1148,7 +1151,7 @@ void WaveformDisplay::showTuneOverlay (const juce::String& noteName, bool succes
 {
     tuneOverlay.reset();
 
-    juce::String title   = "Auto-Tune";
+    juce::String title   = "Sample Tuning";
     juce::String name    = success ? noteName : "";
     juce::String message = success
         ? "Root note tuned to " + noteName + "  (confidence: "

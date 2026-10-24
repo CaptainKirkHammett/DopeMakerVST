@@ -1,5 +1,7 @@
 ## What's Changed in v0.2780.0.5
 
+- **Sidechain FX Only mode** — Third sidechain routing mode that applies the envelope only to the wet FX signal (filter→delay) while keeping the dry sound untouched. Mix knob controls the sidechained FX return level
+- **Drawable sidechain envelope** — Click the sidechain envelope display to freehand-draw a custom volume shape. The drawn envelope replaces the knob-driven one; shape knobs (Pre, Rise, Curve, Fall) dim out. Click "Knob Mode" to return to knob-driven mode. Drawn envelopes are saved with presets
 - **Trance Gate routing** — Route the volume gate to 3 positions in the FX chain: Pre FX (A), Pre Reverb (B), or Post FX (C) via a cycling button next to the Gate fader
 - **1/64 time division** — Tighter tempo-sync option added to all division dropdowns (gate, LFOs, delay, reverb, sidechain, arp)
 - **Sample auto-tune** — Detect the pitch of a loaded sample and set the root note automatically. Click the TUNE badge on the waveform display; result shown in a themed popup with Sure!/No way! buttons

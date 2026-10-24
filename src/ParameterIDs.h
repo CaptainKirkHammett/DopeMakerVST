@@ -179,6 +179,7 @@ namespace ParamIDs
     inline constexpr const char* sidechainRise      = "sidechainRise";
     inline constexpr const char* sidechainCurve     = "sidechainCurve";
     inline constexpr const char* sidechainFall      = "sidechainFall";  // 0=instant drop, 1=shaped fall
+    inline constexpr const char* sidechainDrawMode = "sidechainDrawMode"; // 0=knob, 1=draw
 
     // --- Reverb ---
     inline constexpr const char* reverbEnabled  = "reverbEnabled";

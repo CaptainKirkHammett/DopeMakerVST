@@ -186,6 +186,9 @@ PluginEditor::PluginEditor (PluginProcessor& p)
         waveformDisplay.setFile (f);
         presetManagerPanel.setCurrentSampleFile (f);
     };
+    waveformDisplay.onRootNoteChanged = [this] {
+        sampleControlPanel.blinkRootNoteBox();
+    };
     uiRoot.addAndMakeVisible (waveformDisplay);
 
     // If a sample was already loaded (e.g. project restored via setStateInformation
@@ -220,6 +223,8 @@ PluginEditor::PluginEditor (PluginProcessor& p)
                                       p.apvts.getRawParameterValue (ParamIDs::stutterLenLfoDepth));
     uiRoot.addAndMakeVisible (gateControllerPanel);
     gateControllerPanel.setParameterDisplay (&paramDisplay);
+    sidechainPanel.setDrawnEnvelopeTable (processor.sidechainDrawnEnvelope,
+                                          PluginProcessor::kSidechainTableSize);
     uiRoot.addAndMakeVisible (sidechainPanel);
     uiRoot.addAndMakeVisible (arpPanel);
     uiRoot.addAndMakeVisible (filterPanel);
