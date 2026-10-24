@@ -57,11 +57,14 @@ PitchDetector::Result PitchDetector::detect (const juce::AudioBuffer<float>& buf
 
     // YIN with a fairly strict threshold for one-shot samples.
     constexpr float kYinThreshold = 0.15f;
-    const float period = yinEstimatePeriod (mono.data() + onset, usableSamples,
-                                             kYinThreshold);
+    auto yin = yinEstimatePeriod (mono.data() + onset, usableSamples,
+                                   kYinThreshold);
 
-    if (period <= 0.0f)
+    if (yin.period <= 0.0f)
         return {};
+
+    const float conf = juce::jlimit (0.0f, 1.0f, 1.0f - yin.cmndfMin / kYinThreshold);
+    const float period = yin.period;
 
     const float freqHz = static_cast<float> (sampleRate) / period;
 
@@ -73,17 +76,17 @@ PitchDetector::Result PitchDetector::detect (const juce::AudioBuffer<float>& buf
     const float midiFloat = 69.0f + 12.0f * std::log2 (freqHz / 440.0f);
     const int midiNote = juce::jlimit (0, 119, juce::roundToInt (midiFloat));
 
-    // Confidence is always high if we got a result (YIN threshold already filtered).
-    return { freqHz, midiNote, 1.0f };
+    return { freqHz, midiNote, conf };
 }
 
-float PitchDetector::yinEstimatePeriod (const float* data, int numSamples,
-                                         float threshold)
+PitchDetector::YinResult PitchDetector::yinEstimatePeriod (const float* data,
+                                                           int numSamples,
+                                                           float threshold)
 {
     // YIN window size — half of the available samples, capped to a reasonable max.
     const int W = juce::jmin (numSamples / 2, 4096);
     if (W < 64)
-        return 0.0f;
+        return { 0.0f, 1.0f };
 
     // Step 1 + 2: Difference function d(tau) and cumulative mean normalised
     // difference d'(tau).
@@ -127,7 +130,7 @@ float PitchDetector::yinEstimatePeriod (const float* data, int numSamples,
     }
 
     if (bestTau < 2)
-        return 0.0f;
+        return { 0.0f, 1.0f };
 
     // Step 4: Parabolic interpolation around the minimum for sub-sample precision.
     if (bestTau > 0 && bestTau < W - 1)
@@ -140,9 +143,9 @@ float PitchDetector::yinEstimatePeriod (const float* data, int numSamples,
         if (std::fabs (denom) > 1e-12f)
         {
             const float correction = (s0 - s2) / denom;
-            return static_cast<float> (bestTau) + correction;
+            return { static_cast<float> (bestTau) + correction, bestVal };
         }
     }
 
-    return static_cast<float> (bestTau);
+    return { static_cast<float> (bestTau), bestVal };
 }

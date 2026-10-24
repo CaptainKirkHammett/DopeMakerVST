@@ -120,6 +120,7 @@ float LfoProcessor::syncDivisionToHz (double bpm, SyncDivision div)
 {
     // Division lengths as multiples of a quarter note.
     static constexpr double kDivBeats[] = {
+        1.0 / 16.0,  // 1/64
         1.0 / 8.0,   // 1/32
         1.0 / 4.0,   // 1/16
         1.0 / 2.0,   // 1/8
@@ -130,8 +131,7 @@ float LfoProcessor::syncDivisionToHz (double bpm, SyncDivision div)
         3.0,         // 1/2D
         4.0,         // 1/1
         6.0,         // 1/1D
-        8.0,         // 2/1
-        1.0 / 16.0   // 1/64
+        8.0          // 2/1
     };
 
     const int idx = static_cast<int> (div);

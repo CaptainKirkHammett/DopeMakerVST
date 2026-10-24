@@ -11,9 +11,8 @@ ArpeggiatorPanel::ArpeggiatorPanel (juce::AudioProcessorValueTreeState& apvts)
 
     // Time division combo — sits next to the enable button.
     // 1/64 displayed first; item IDs match parameter choice indices (1-based).
-    divBox.addItem ("1/64", 12);
     const juce::StringArray divNames {
-        "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1"
+        "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1"
     };
     for (int i = 0; i < divNames.size(); ++i)
         divBox.addItem (divNames[i], i + 1);
@@ -48,8 +47,7 @@ ArpeggiatorPanel::ArpeggiatorPanel (juce::AudioProcessorValueTreeState& apvts)
         apvts, ParamIDs::arpLfoWaveform, lfoWaveBox);
 
     // LFO division combo (same grid as arp step division).
-    lfoDivBox.addItem ("1/64", 12);
-    { const juce::StringArray dn { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" };
+    { const juce::StringArray dn { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" };
       for (int i = 0; i < dn.size(); ++i) lfoDivBox.addItem (dn[i], i + 1); }
     addAndMakeVisible (lfoDivBox);
     lfoDivAttach = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (

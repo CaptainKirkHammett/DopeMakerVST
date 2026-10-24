@@ -350,10 +350,12 @@ juce::String WaveformDisplay::BadgeOverlay::getTooltip()
     const auto mouse = getMouseXYRelative();
 
     if (getTuneBadgeBounds().contains (mouse))
-        return "Sample Tuning\n\n"
+        return "Sample Tuning (experimental)\n\n"
                "Detects the pitch of the loaded sample and adjusts\n"
                "the root note so MIDI keys match the actual note.\n"
-               "Uses the region between the Start and End markers.";
+               "Uses the region between the Start and End markers.\n\n"
+               "This is an experimental feature and may not always\n"
+               "produce accurate results.";
 
     if (getNormBadgeBounds().contains (mouse))
         return "Peak Normalize\n\n"

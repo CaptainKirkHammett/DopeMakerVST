@@ -85,6 +85,7 @@ void SidechainProcessor::process (juce::AudioBuffer<float>& buffer,
 
     // Division lengths in quarter notes — mirrors LfoProcessor::kDivBeats.
     static constexpr double kDivBeats[] = {
+        1.0 / 16.0,  // 1/64
         1.0 / 8.0,   // 1/32
         1.0 / 4.0,   // 1/16
         1.0 / 2.0,   // 1/8

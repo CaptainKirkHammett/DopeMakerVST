@@ -115,8 +115,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         ParamIDs::velLfoTempoSync, "Vel LFO Tempo Sync", false));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::velLfoSyncDiv, "Vel LFO Sync Division",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1","1/64" },
-        4));
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        5));  // default: 1/4
 
     // --- Sample Start LFO ---
     params.push_back (std::make_unique<juce::AudioParameterBool> (
@@ -156,8 +156,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         ParamIDs::lfoTempoSync, "LFO Tempo Sync", false));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::lfoSyncDiv, "LFO Sync Division",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1","1/64" },
-        4));
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        5));  // default: 1/4
 
     // --- Volume Envelope ---
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
@@ -228,8 +228,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         ParamIDs::volRelLfoTempoSync, "Vol Rel LFO Sync", false));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::volRelLfoSyncDiv, "Vol Rel LFO Div",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1","1/64" },
-        4));
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        5));  // default: 1/4
 
     // --- Pitch LFO ---
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
@@ -245,8 +245,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         ParamIDs::pitchLfoTempoSync, "Pitch LFO Sync", false));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::pitchLfoSyncDiv, "Pitch LFO Div",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1","1/64" },
-        4));
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        5));  // default: 1/4
 
     // --- Pitch Envelope ---
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
@@ -383,8 +383,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         ParamIDs::reverbRevSync, "Reverb Reverse Sync", false));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::reverbRevDiv, "Reverb Reverse Division",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1","1/64" },
-        4));   // default: 1/4
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        5));   // default: 1/4
 
     // --- Phaser ---
     params.push_back (std::make_unique<juce::AudioParameterBool> (
@@ -422,8 +422,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         juce::NormalisableRange<float> (1.0f, 32.0f, 1.0f), 16.0f));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::gateDivision, "Gate Division",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1","1/64" },
-        1)); // default: 1/16
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        2)); // default: 1/16
     for (int i = 0; i < GateController::kMaxSteps; ++i)
         params.push_back (std::make_unique<juce::AudioParameterFloat> (
             ParamIDs::gateStepId (i), "Gate Step " + juce::String (i + 1),
@@ -482,12 +482,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         ParamIDs::delayTempoSync, "Delay Tempo Sync", true));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::delayTimeLDiv, "Delay L Div",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1","1/64" },
-        4));
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        5));  // default: 1/4
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::delayTimeRDiv, "Delay R Div",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1","1/64" },
-        3));
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        4));  // default: 1/8D
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::delayFeedback, "Delay Feedback",
         juce::NormalisableRange<float> (0.0f, 0.99f), 0.4f,
@@ -539,8 +539,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         ParamIDs::delayMixLfoSync, "Delay Mix LFO Sync", false));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::delayMixLfoDiv, "Delay Mix LFO Div",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1","1/64" },
-        4));
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        5));  // default: 1/4
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::delayDuck, "Delay Duck",
         juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f));
@@ -618,8 +618,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         ParamIDs::arpNoteLength, "Arpeggiator Note Length", 0.0f, 1.0f, 0.8f));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::arpDivision, "Arpeggiator Division",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1","1/64" },
-        1));  // default: 1/16
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        2));  // default: 1/16
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::arpProbability, "Arp Play Probability", 0.0f, 1.0f, 1.0f));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
@@ -627,8 +627,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         juce::StringArray { "Sine","Tri","Sqr","SawU","SawD","Rnd~","Rnd|" }, 0));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::arpLfoDivision, "Arp LFO Division",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1","1/64" },
-        4));  // default: 1/4
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        5));  // default: 1/4
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::arpLfoDepth, "Arp Note Length LFO Depth", 0.0f, 1.0f, 0.5f));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
@@ -641,8 +641,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParam
         juce::StringArray { "Sidechain Off", "Sidechain Pre", "Sidechain Post", "Sidechain FX Only" }, 0));
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         ParamIDs::sidechainDivision, "Sidechain Division",
-        juce::StringArray { "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1","1/64" },
-        4));  // default: 1/4
+        juce::StringArray { "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1" },
+        5));  // default: 1/4
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::sidechainMix, "Sidechain Mix",
         juce::NormalisableRange<float> (0.0f, 1.0f), 0.8f,

@@ -35,9 +35,8 @@ MagixxPanel::MagixxPanel (juce::AudioProcessorValueTreeState& apvts)
         apvts, ParamIDs::lfoTempoSync, syncButton);
 
     {
-        syncDivBox.addItem ("1/64", 12);
         const juce::StringArray divNames {
-            "1/32", "1/16", "1/8", "1/8D", "1/4", "1/4D",
+            "1/64", "1/32", "1/16", "1/8", "1/8D", "1/4", "1/4D",
             "1/2",  "1/2D", "1/1", "1/1D", "2/1"
         };
         for (int i = 0; i < divNames.size(); ++i)
@@ -170,9 +169,8 @@ MagixxPanel::MagixxPanel (juce::AudioProcessorValueTreeState& apvts)
         apvts, ParamIDs::velLfoTempoSync, velSyncButton);
 
     {
-        velSyncDivBox.addItem ("1/64", 12);
         const juce::StringArray divNames {
-            "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1"
+            "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1"
         };
         for (int i = 0; i < divNames.size(); ++i)
             velSyncDivBox.addItem (divNames[i], i + 1);
@@ -229,9 +227,8 @@ MagixxPanel::MagixxPanel (juce::AudioProcessorValueTreeState& apvts)
         apvts, ParamIDs::volRelLfoTempoSync, relSyncButton);
 
     {
-        relSyncDivBox.addItem ("1/64", 12);
         const juce::StringArray divNames {
-            "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1"
+            "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1"
         };
         for (int i = 0; i < divNames.size(); ++i)
             relSyncDivBox.addItem (divNames[i], i + 1);
@@ -279,9 +276,8 @@ MagixxPanel::MagixxPanel (juce::AudioProcessorValueTreeState& apvts)
         apvts, ParamIDs::pitchLfoTempoSync, pitchSyncButton);
 
     {
-        pitchSyncDivBox.addItem ("1/64", 12);
         const juce::StringArray divNames {
-            "1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1"
+            "1/64","1/32","1/16","1/8","1/8D","1/4","1/4D","1/2","1/2D","1/1","1/1D","2/1"
         };
         for (int i = 0; i < divNames.size(); ++i)
             pitchSyncDivBox.addItem (divNames[i], i + 1);

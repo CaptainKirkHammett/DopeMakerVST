@@ -23,9 +23,12 @@ public:
                           float endNorm   = 1.0f);
 
 private:
+    struct YinResult { float period; float cmndfMin; };
+
     // Core YIN difference function + cumulative mean normalised difference.
-    // Returns the estimated period in samples (fractional via parabolic interpolation),
-    // or 0 if no clear pitch is found.
-    static float yinEstimatePeriod (const float* data, int numSamples,
-                                    float threshold);
+    // Returns the estimated period in samples (fractional via parabolic interpolation)
+    // and the CMNDF minimum value (lower = more confident).
+    // Period is 0 if no clear pitch is found.
+    static YinResult yinEstimatePeriod (const float* data, int numSamples,
+                                        float threshold);
 };
