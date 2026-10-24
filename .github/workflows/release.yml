@@ -260,6 +260,9 @@ jobs:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout (for WHATSNEW file)
+        uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -268,12 +271,26 @@ jobs:
       - name: List release files
         run: ls -lh DopeMaker_*
 
+      - name: Resolve release notes
+        id: notes
+        run: |
+          VER="${{ github.ref_name }}"
+          NOTES_FILE="WHATSNEW-${VER}.md"
+          if [ -f "$NOTES_FILE" ]; then
+            echo "file=$NOTES_FILE" >> "$GITHUB_OUTPUT"
+            echo "generate=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "file=" >> "$GITHUB_OUTPUT"
+            echo "generate=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: Dope Maker ${{ github.ref_name }}
           draft: false
-          generate_release_notes: true
+          body_path: ${{ steps.notes.outputs.file || '' }}
+          generate_release_notes: ${{ steps.notes.outputs.generate == 'true' }}
           files: |
             DopeMaker_*_macOS.zip
             DopeMaker_*_macOS.pkg
