@@ -13,8 +13,3 @@
 - **Step highlight fix** — Green highlights now start at step 5 (the trance clap step)
 - **Signal path chart** — Updated to two-column layout with Trance Gate routing shown as full blocks at all 3 positions
 - **AU cache refresh** — macOS installer now resets the AU cache so updated components load immediately
-
-### Also included
-- Factory presets & samples bundled with all downloads
-- macOS universal binary support (Intel + Apple Silicon)
-- macOS .pkg installer included in CI builds for dev branch testing
